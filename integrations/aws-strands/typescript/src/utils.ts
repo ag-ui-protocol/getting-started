@@ -24,6 +24,16 @@ const LOG_PREFIX = "[@ag-ui/aws-strands]";
 
 // Allowed formats per media type for Strands ContentBlock
 const IMAGE_FORMATS = new Set<string>(["png", "jpeg", "gif", "webp"]);
+// `3gp` is the SDK's spelling: its Bedrock provider translates that to
+// Bedrock's own `three_gp` on the way out, so emitting `three_gp` here would
+// skip the translation and hand every other provider a format it does not
+// know.
+//
+// Documents are the opposite case. The SDK's `DocumentFormat` union also
+// carries `json` and `xml`, but document formats reach Bedrock UNtranslated
+// and Bedrock's own enum has neither, so accepting them would turn one
+// unsupported attachment into a rejected request. Dropping the attachment
+// loses less than failing the turn, so this list stays Bedrock's.
 const DOCUMENT_FORMATS = new Set<string>([
   "pdf",
   "csv",
@@ -42,27 +52,104 @@ const VIDEO_FORMATS = new Set<string>([
   "mpeg",
   "mpg",
   "mp4",
-  "three_gp",
+  "3gp",
   "webm",
   "wmv",
 ]);
 
+/**
+ * MIME subtypes that do not spell the Strands format string they mean.
+ *
+ * Without these, most of the formats the sets above claim to support are
+ * unreachable: `text/plain` parses to `plain`, not `txt`, and the registered
+ * subtypes for Word, Excel, Matroska and 3GPP (`msword`, `vnd.ms-excel`,
+ * `x-matroska`, `3gpp`) do not match the format strings `doc`, `xls`, `mkv` or
+ * `3gp` that the sets are keyed on. The mapping is a superset of the
+ * Python sibling's, which covers the document and image entries but not the
+ * video ones.
+ */
+const MIME_FORMAT_ALIASES: Readonly<Record<string, string>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, string>, {
+    // Documents
+    plain: "txt",
+    markdown: "md",
+    "x-markdown": "md",
+    msword: "doc",
+    "vnd.ms-excel": "xls",
+    "vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    // Images
+    jpg: "jpeg",
+    // Videos
+    "3gpp": "3gp",
+    quicktime: "mov",
+    "x-matroska": "mkv",
+    "x-flv": "flv",
+    "x-ms-wmv": "wmv",
+  }),
+);
+
+/**
+ * Split a MIME type into its family and subtype, or null if it is not one.
+ *
+ * Parameters are stripped first: `text/plain; charset=utf-8` carries the same
+ * subtype as `text/plain`, and reading a slash-separated segment out of the
+ * whole string would otherwise yield `plain; charset=utf-8` and fail.
+ *
+ * Exactly one slash is required. Taking the family from the front and the
+ * subtype from the back independently would let a value carrying two types,
+ * such as the `text/html, application/pdf` a merged duplicate header produces,
+ * satisfy a family check with one of them and supply its format from the
+ * other.
+ */
+function parseMime(
+  mimeType: string,
+): { topLevel: string; subtype: string } | null {
+  const essence = (mimeType.split(";")[0] ?? "").trim().toLowerCase();
+  const parts = essence.split("/");
+  if (parts.length !== 2) return null;
+  const [topLevel, subtype] = parts as [string, string];
+  if (!topLevel || !subtype) return null;
+  return { topLevel: topLevel.trim(), subtype: subtype.trim() };
+}
+
+/** Resolve an already-parsed subtype to a format in `allowed`, or null. */
+function formatFromSubtype(
+  subtype: string,
+  allowed: Set<string>,
+): string | null {
+  const fmt = MIME_FORMAT_ALIASES[subtype] ?? subtype;
+  return allowed.has(fmt) ? fmt : null;
+}
+
 /** Parse a MIME type into a short format string; returns null if absent or unsupported. */
 function mimeToFormat(
-  mimeType: string | undefined,
+  mimeType: string | undefined | null,
   allowed: Set<string>,
   log: Logger,
+  where?: string,
+  preparsed?: { topLevel: string; subtype: string },
 ): string | null {
+  const at = where ? ` (${where})` : "";
   if (!mimeType) {
-    log.warn(`${LOG_PREFIX} No MIME type provided, cannot determine format`);
+    log.warn(
+      `${LOG_PREFIX} No MIME type provided${at}, cannot determine format`,
+    );
     return null;
   }
-  const fmt = mimeType.split("/").pop()?.toLowerCase() ?? "";
-  if (allowed.has(fmt)) {
+  const parsed = preparsed ?? parseMime(mimeType);
+  if (!parsed) {
+    log.warn(
+      `${LOG_PREFIX} Unusable MIME type '${forLog(mimeType)}'${at}: not a single type/subtype pair`,
+    );
+    return null;
+  }
+  const fmt = formatFromSubtype(parsed.subtype, allowed);
+  if (fmt) {
     return fmt;
   }
   log.warn(
-    `${LOG_PREFIX} Unsupported MIME type '${forLog(mimeType)}' (parsed format '${forLog(fmt)}' not in ${JSON.stringify([...allowed].sort())})`,
+    `${LOG_PREFIX} Unsupported MIME type '${forLog(mimeType)}'${at} (parsed format '${forLog(MIME_FORMAT_ALIASES[parsed.subtype] ?? parsed.subtype)}' not in ${JSON.stringify([...allowed].sort())})`,
   );
   return null;
 }
@@ -74,7 +161,12 @@ function mimeToFormat(
  * past the size cap. These are logged at `error` level, so the signal stays
  * specific to a request that was actually turned away.
  *
- * @internal not part of the package's public API; exported for tests.
+ * Part of the package's public API, re-exported from `src/index.ts`, so a host
+ * configuring `StrandsAgentConfig.urlFetchPolicy` can identify a refusal it
+ * caused. Unlike its neighbours here it therefore carries no internal-only
+ * marker: `stripInternal` is on, and a marked declaration is dropped from the
+ * emitted types, which makes it unexportable from the entry. Do not add one
+ * back without removing the re-export.
  */
 export class UrlFetchPolicyError extends Error {
   constructor(message: string) {
@@ -113,8 +205,6 @@ let cryptoModule: typeof import("node:crypto") | undefined;
  * for the same URL can still be correlated with each other and, given the URL,
  * confirmed by hand.
  *
- * This is a deliberate divergence from the Python sibling, which logs the URL
- * as given.
  */
 function describeUrl(url: string): string {
   if (!cryptoModule) return "url<digest unavailable>";
@@ -126,7 +216,7 @@ function describeUrl(url: string): string {
   return `url#${digest}`;
 }
 
-/** Load the hash used by {@link describeUrl}. Called before any logging. */
+/** Load the hash used by {@link describeUrl}. Called before any log line that names a URL. */
 async function loadCrypto(): Promise<void> {
   cryptoModule ??= await import("node:crypto");
 }
@@ -139,10 +229,13 @@ async function loadCrypto(): Promise<void> {
  */
 function forLog(value: unknown, max = 120): string {
   const text = String(value).replace(
-    // CR, LF, TAB, VT, FF, NUL, ESC, NEL, LS and PS. Several of these are
-    // treated as line breaks by log consumers, and ESC lets a terminal sink be
-    // driven with control sequences.
-    /[\r\n\t\v\f\0\u001b\u0085\u2028\u2029]+/g,
+    // The whole C0 range and DEL, the whole C1 range (which includes NEL at
+    // U+0085 and the 8-bit CSI at U+009B), and the Unicode line and paragraph
+    // separators. Several of these are treated as line breaks by log
+    // consumers, and the escape introducers let a terminal sink be driven with
+    // control sequences. Named individually, the set was missing U+001C to
+    // U+001F, DEL and most of C1.
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g,
     " ",
   );
   return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -200,10 +293,12 @@ function scrubSecrets(text: string, ...urls: string[]): string {
  * There is no port dimension: a host whose addresses are all public is
  * reachable on any port, as in the Python fix this mirrors (#2491).
  *
- * Relaxing the address checks requires passing a custom policy to
- * `fetchUrlBytes`. No supported AG-UI-to-Strands conversion path currently
- * accepts one, so in practice the defaults are what a consumer gets. Even
- * under `allowPrivateNetworks`, this-network, link-local ranges and the cloud
+ * Relaxing the address checks is an explicit opt-in, and only ever the
+ * host's: `StrandsAgentConfig.urlFetchPolicy` is threaded into every
+ * conversion the adapter makes, and a direct `fetchUrlContent` caller can
+ * pass one too. Nothing a client puts in a `RunAgentInput` reaches it, so
+ * absent that configuration the defaults are what a consumer gets. Even under
+ * `allowPrivateNetworks`, this-network, link-local ranges and the cloud
  * metadata endpoints listed in `ALWAYS_BLOCKED_IPV4`/`ALWAYS_BLOCKED_IPV6`
  * stay blocked; that list covers the major providers rather than every
  * provider.
@@ -801,8 +896,26 @@ function formatAddress(ip: IpAddress): string {
 /** The largest delay `setTimeout` accepts without silently clamping to 1ms. */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
-/** Reject a policy whose limits cannot express a meaningful decision. */
-function assertUsablePolicy(policy: UrlFetchPolicy): void {
+/**
+ * Reject a policy whose limits cannot express a meaningful decision.
+ *
+ * Throws a plain `Error`: an unusable policy is a programming or
+ * configuration mistake, not a fetch outcome, so it is deliberately not one
+ * of the two errors {@link fetchUrlContent} turns into a logged `null`.
+ *
+ * `fetchUrlContent` calls this itself, which is enough to fail closed but
+ * fails once per attachment and, on the history-replay path, inside a
+ * try/catch that would report it as a conversion that fell back to text. The
+ * adapter therefore calls this once up front, before the run fetches
+ * anything, so a misconfigured policy surfaces as a run-level error naming
+ * the field. Python has no equivalent call because its `UrlFetchPolicy` is a
+ * frozen dataclass that validates in `__post_init__`; a TypeScript interface
+ * has no constructor to validate in.
+ *
+ * @internal not part of the package's public API; exported for the adapter's
+ * configuration check and for tests.
+ */
+export function assertUsablePolicy(policy: UrlFetchPolicy): void {
   if (!Number.isInteger(policy.maxBytes) || policy.maxBytes < 1) {
     throw new Error(
       `URL fetch policy maxBytes must be an integer of at least 1, got ${policy.maxBytes}`,
@@ -907,6 +1020,21 @@ function pinnedLookup(approved: IpAddress[]) {
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 /**
+ * Escape a literal `%` that does not begin a valid `%XX` escape.
+ *
+ * The URL parser already percent-encodes spaces and non-ASCII in the path and
+ * query, so those need no help here, and it leaves existing escapes alone so a
+ * presigned URL keeps the `%2F` and `%3D` its signature was computed over.
+ * What it does not repair is a `%` from a name like `50%.txt`, which would go
+ * on the wire as an invalid request target. Only `%` is rewritten, so the
+ * result cannot grow an authority delimiter and the component stays within the
+ * URL it came from.
+ */
+function escapeBarePercent(component: string): string {
+  return component.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
+}
+
+/**
  * Perform one request, reaching only `approved`.
  *
  * A fresh agent with keep-alive disabled is used for every hop. A pooled socket
@@ -947,7 +1075,10 @@ async function pinnedRequest(
         protocol: url.protocol,
         hostname: url.hostname,
         port: url.port === "" ? (secure ? 443 : 80) : Number(url.port),
-        path: `${url.pathname}${url.search}`,
+        // Built from the components of the target validation just cleared, and
+        // after that validation, so the repair cannot reach the host, the port
+        // or the addresses `lookup` is pinned to.
+        path: `${escapeBarePercent(url.pathname)}${escapeBarePercent(url.search)}`,
         method: "GET",
         lookup: pinnedLookup(approved) as never,
         agent,
@@ -1145,8 +1276,16 @@ async function readBoundedBody(
   return body;
 }
 
+/** A fetched body together with the content type the response declared. */
+export interface FetchedContent {
+  readonly bytes: Uint8Array;
+  /** The response `Content-Type`, or `null` when the response omitted one. */
+  readonly contentType: string | null;
+}
+
 /**
- * Fetch raw bytes from a URL using the global fetch (Node 20+).
+ * Fetch a URL's body and declared content type using the global fetch
+ * (Node 20+).
  *
  * The URL is validated against `policy` before any request is made and again
  * on every redirect hop, so requests to private, loopback or cloud-metadata
@@ -1159,11 +1298,12 @@ async function readBoundedBody(
  *
  * @internal not part of the package's public API; exported for tests.
  */
-export async function fetchUrlBytes(
+export async function fetchUrlContent(
   url: string,
   log: Logger,
   policy: UrlFetchPolicy = DEFAULT_URL_FETCH_POLICY,
-): Promise<Uint8Array | null> {
+  callerSignal?: AbortSignal,
+): Promise<FetchedContent | null> {
   assertUsablePolicy(policy);
   // Loaded up front so every failure path below can name the URL opaquely.
   await loadCrypto();
@@ -1179,6 +1319,14 @@ export async function fetchUrlBytes(
     policy.timeoutMs,
   );
   const deadlineAt = now() + policy.timeoutMs;
+  // The caller's signal only ever aborts sooner; it grants no reach the
+  // policy did not already allow.
+  const onCallerAbort = () =>
+    controller.abort(
+      new UrlFetchUnavailableError("the caller abandoned the request"),
+    );
+  if (callerSignal?.aborted) onCallerAbort();
+  callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
   try {
     let target = url;
     for (let hop = 0; ; hop++) {
@@ -1259,7 +1407,10 @@ export async function fetchUrlBytes(
         );
         return null;
       }
-      return await readBoundedBody(res, policy.maxBytes);
+      return {
+        bytes: await readBoundedBody(res, policy.maxBytes),
+        contentType: res.headers.get("content-type"),
+      };
     }
   } catch (e) {
     if (e instanceof UrlFetchPolicyError) {
@@ -1283,10 +1434,29 @@ export async function fetchUrlBytes(
     return null;
   } finally {
     clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", onCallerAbort);
   }
 }
 
-function decodeBase64(value: string, log: Logger): Uint8Array | null {
+/**
+ * {@link fetchUrlContent} for callers that only need the body.
+ *
+ * @internal not part of the package's public API; exported for tests.
+ */
+export async function fetchUrlBytes(
+  url: string,
+  log: Logger,
+  policy: UrlFetchPolicy = DEFAULT_URL_FETCH_POLICY,
+): Promise<Uint8Array | null> {
+  const fetched = await fetchUrlContent(url, log, policy);
+  return fetched ? fetched.bytes : null;
+}
+
+function decodeBase64(
+  value: string,
+  log: Logger,
+  where: string,
+): Uint8Array | null {
   try {
     const bin = globalThis.atob(value);
     const out = new Uint8Array(bin.length);
@@ -1295,95 +1465,516 @@ function decodeBase64(value: string, log: Logger): Uint8Array | null {
     }
     return out;
   } catch (e) {
-    log.warn(`${LOG_PREFIX} Failed to decode base64 content:`, e);
+    log.warn(`${LOG_PREFIX} Failed to decode base64 content (${where}):`, e);
     return null;
   }
 }
 
-/** Resolve bytes from an AG-UI content source. */
-async function resolveSourceBytes(
+/**
+ * Per-request memo of what each URL returned, keyed by URL and policy.
+ *
+ * One conversation turn is converted more than once on a cold run: once
+ * building the construction-time seed and again reconciling the replayed
+ * history. Sharing one of these across those conversions is what keeps a
+ * remote attachment to a single download per run instead of one per
+ * conversion.
+ *
+ * Promises rather than values, so two conversions asking for the same URL at
+ * the same time share the one request. Failures are memoised too: a URL the
+ * policy refused stays refused for the rest of the run rather than being
+ * retried per conversion.
+ *
+ * Entries are keyed on the URL together with the policy it is fetched under,
+ * not the URL alone, so the memoised refusal above belongs to the policy that
+ * made it and is never handed to a caller running under a different one.
+ *
+ * Every consumer of one URL receives the SAME `Uint8Array`, not a copy. That
+ * is the point (the bytes are held once however many blocks reference them),
+ * and it holds because content blocks treat their source bytes as read-only.
+ * A consumer that needs to mutate them must copy first.
+ *
+ * A memoised fetch is bound to the signal of whichever caller started it. That
+ * is sound because a cache and a cancellation signal both belong to one
+ * request and are passed together: every caller sharing a cache shares the
+ * signal that filled it. Pairing a cache with a different signal per call
+ * would break that.
+ */
+export type UrlFetchCache = Map<string, Promise<FetchedContent | null>>;
+
+/** Create a cache for one request. */
+export function createUrlFetchCache(): UrlFetchCache {
+  return new Map();
+}
+
+/**
+ * What one request shares across every conversion it makes.
+ *
+ * `messageId` is the field that varies between the conversions of a single
+ * request: it scopes document names to the message they came from, so two
+ * messages carrying byte-identical documents still produce the distinct names
+ * Bedrock requires.
+ */
+export interface MediaConversionOptions {
+  /** Shared so one URL is fetched once per request, not once per conversion. */
+  readonly fetchCache?: UrlFetchCache;
+  /** The AG-UI id of the message this content belongs to. */
+  readonly messageId?: string;
+  /**
+   * Aborts in-flight downloads when the caller goes away. Media resolution
+   * runs long before the model does, so without this a client disconnect
+   * leaves a slow attachment transferring until it finishes or times out.
+   */
+  readonly signal?: AbortSignal;
+  /**
+   * The policy every URL source in this request is fetched under.
+   *
+   * `undefined` means {@link DEFAULT_URL_FETCH_POLICY}. The adapter sets this
+   * once per run from `StrandsAgentConfig.urlFetchPolicy`, so the construction
+   * seed, the replayed history and the live turn all fetch under the same one.
+   */
+  readonly urlFetchPolicy?: UrlFetchPolicy;
+}
+
+/**
+ * A cache key that cannot confuse two policies, or two URLs.
+ *
+ * Every field here changes what a fetch returns for the same URL, so all of
+ * them are in the key. The refusals matter most: a URL a strict policy turned
+ * away is memoised as `null`, and serving that to a caller who opted into the
+ * private network would silently ignore the opt-in.
+ *
+ * `JSON.stringify` over one array, rather than a `${a}:${b}` join, because a
+ * join has no delimiter a value cannot contain: a URL may hold any character,
+ * including whatever separator was picked. The array's own structure keeps the
+ * parts apart, and both lists are sorted so a policy spelled in a different
+ * order is still the same policy. The `?? []` on the prefixes mirrors what
+ * `nat64Prefixes` tolerates, so a policy this key accepts is one the checks
+ * accept too.
+ */
+function fetchCacheKey(url: string, policy: UrlFetchPolicy): string {
+  return JSON.stringify([
+    url,
+    [...policy.allowedSchemes].sort(),
+    policy.allowPrivateNetworks,
+    policy.maxBytes,
+    policy.timeoutMs,
+    policy.maxRedirects,
+    [...(policy.nat64Prefixes ?? [])].sort(),
+  ]);
+}
+
+function fetchUrlContentCached(
+  url: string,
+  log: Logger,
+  options: MediaConversionOptions | undefined,
+): Promise<FetchedContent | null> {
+  const cache = options?.fetchCache;
+  const signal = options?.signal;
+  const policy = options?.urlFetchPolicy ?? DEFAULT_URL_FETCH_POLICY;
+  if (!cache) {
+    return fetchUrlContent(url, log, policy, signal);
+  }
+  // Checked before the key is built rather than only inside the fetch, so an
+  // unusable policy cannot reach the iteration the key does over its fields
+  // and surface as a bare TypeError instead of the sentence naming the field.
+  assertUsablePolicy(policy);
+  // Keyed on the URL AND the policy. One run passes one policy, so the
+  // sharing this cache exists for is untouched: two conversions of the same
+  // URL in a run still make one request. A caller that mixes policies over
+  // one cache gets one entry per pair instead of the first policy's answer
+  // for all of them.
+  const key = fetchCacheKey(url, policy);
+  let pending = cache.get(key);
+  if (!pending) {
+    pending = fetchUrlContent(url, log, policy, signal);
+    cache.set(key, pending);
+  }
+  return pending;
+}
+
+/** Resolve an AG-UI content source to bytes and whatever type it declared. */
+async function resolveSource(
   source: InputContentSource,
   log: Logger,
-): Promise<Uint8Array | null> {
+  options: MediaConversionOptions | undefined,
+  where: string,
+): Promise<FetchedContent | null> {
+  // `value` is typed as a string on both variants but arrives off the wire.
+  // A non-string reaching `atob` is silently coerced and shipped as content;
+  // one reaching the fetch throws from inside its own error handler, where
+  // `describeUrl` hashes it. Both are refused here instead.
+  if (typeof source.value !== "string") {
+    log.warn(
+      `${LOG_PREFIX} Content source (${where}) has no usable value, cannot resolve bytes`,
+    );
+    return null;
+  }
   if (source.type === "data") {
-    return decodeBase64(source.value, log);
+    const bytes = decodeBase64(source.value, log, where);
+    return bytes ? { bytes, contentType: null } : null;
   }
   if (source.type === "url") {
-    return await fetchUrlBytes(source.value, log);
+    return await fetchUrlContentCached(source.value, log, options);
   }
   log.warn(
-    `${LOG_PREFIX} Unknown content source type: ${forLog((source as { type?: string }).type)}, cannot resolve bytes`,
+    `${LOG_PREFIX} Unknown content source type (${where}): ${forLog((source as { type?: string }).type)}, cannot resolve bytes`,
   );
   return null;
 }
 
+/** A media item that could not be turned into a ContentBlock, and why. */
+export interface DroppedMedia {
+  /**
+   * The AG-UI content type of the item that was dropped. Bounded and stripped
+   * of control characters like every other client-supplied value that leaves
+   * this module, because an unknown type is whatever the client sent.
+   */
+  readonly type: string;
+  /** A short, non-sensitive reason, safe to put on the wire. */
+  readonly reason: string;
+}
+
+/** What one conversion produced, including what it could not convert. */
+export interface MediaConversionResult {
+  readonly blocks: ContentBlock[];
+  /**
+   * Media items the conversion could not deliver. Empty on a clean
+   * conversion, so a caller can tell a partial delivery from a message that
+   * carried no attachments at all.
+   *
+   * Every conversion reports its own drops. Which of those reach the wire is
+   * the adapter's decision, and it reports only the live turn's: re-announcing
+   * a drop from an earlier turn on every replay of the thread would say
+   * nothing new.
+   */
+  readonly dropped: DroppedMedia[];
+}
+
+const IMAGE_TOP_LEVEL: ReadonlySet<string> = new Set(["image"]);
+const VIDEO_TOP_LEVEL: ReadonlySet<string> = new Set(["video"]);
+// Documents legitimately arrive as either, e.g. application/pdf and text/csv.
+const DOCUMENT_TOP_LEVEL: ReadonlySet<string> = new Set([
+  "application",
+  "text",
+]);
+
+const DROP_UNSUPPORTED_TYPE = "unsupported media type";
+const DROP_UNRESOLVABLE = "content could not be resolved";
+// Kept apart from DROP_UNRESOLVABLE: a caller can fix a malformed item, and
+// cannot fix a remote host that would not answer.
+const DROP_MALFORMED = "content item is malformed";
+const DROP_EMPTY = "content was empty";
+// Kept distinct from DROP_UNSUPPORTED_TYPE: a caller can fix a missing type by
+// declaring one, and cannot fix a type this adapter does not carry.
+const DROP_UNTYPED = "no media type declared or returned";
+
 /**
- * Convert an AG-UI `InputContent` list to Strands `ContentBlock` values.
+ * Resolve one media item to the format string and bytes a ContentBlock needs.
+ *
+ * The declared type is checked before anything is fetched or decoded, so an
+ * attachment that could never be delivered costs no egress. A URL source that
+ * declares no type is the one case that has to be fetched first: the
+ * response's own content type is then the only thing left to read it from.
+ */
+async function resolveMedia(
+  source: InputContentSource,
+  allowed: Set<string>,
+  topLevel: ReadonlySet<string>,
+  log: Logger,
+  options: MediaConversionOptions | undefined,
+  where: string,
+): Promise<{ bytes: Uint8Array; format: string } | { drop: string }> {
+  // Typed as present, but it arrives off the wire. A malformed item is
+  // dropped like any other rather than throwing out of the conversion and
+  // taking the message's other attachments with it.
+  if (!source || typeof source !== "object") {
+    log.warn(`${LOG_PREFIX} Skipping content (${where}): ${DROP_MALFORMED}`);
+    return { drop: DROP_MALFORMED };
+  }
+  const declared =
+    typeof source.mimeType === "string" ? source.mimeType : undefined;
+  let format: string | null = null;
+  if (declared) {
+    format = mimeToFormat(declared, allowed, log, where);
+    if (!format) return { drop: DROP_UNSUPPORTED_TYPE };
+  }
+
+  const resolved = await resolveSource(source, log, options, where);
+  if (!resolved) {
+    // resolveSource names this item on every path it refuses itself. Only a
+    // fetch failure does not: that logs against the URL's digest, deeper down,
+    // so it is the one case still missing a line naming the attachment.
+    if (source.type === "url") {
+      log.warn(
+        `${LOG_PREFIX} Skipping content (${where}): ${DROP_UNRESOLVABLE}`,
+      );
+    }
+    return { drop: DROP_UNRESOLVABLE };
+  }
+  if (resolved.bytes.length === 0) {
+    // A zero-length array is truthy, so this needs its own check: an empty
+    // block is not a smaller attachment, it is one the provider rejects for
+    // the whole request.
+    log.warn(
+      `${LOG_PREFIX} Skipping content with an empty body (${where}): a zero-byte block is rejected by the provider`,
+    );
+    return { drop: DROP_EMPTY };
+  }
+
+  if (!format) {
+    // Only reached when the source declared nothing, so this type is entirely
+    // the remote server's word, and only this path is checked against the
+    // family. A DECLARED `text/png` on an image is still accepted, because a
+    // client naming its own attachment is not the case being defended
+    // against. Requiring the top-level type to match the kind
+    // of attachment asked for stops a server relabelling a payload across
+    // families, e.g. serving `text/png` for an image, which the subtype check
+    // below would accept on its own.
+    //
+    // It does NOT make an untyped document URL safe: an error page served as
+    // `text/html` is a legitimate document type, and nothing in a 200 response
+    // distinguishes it from the document that was asked for. Declaring a type
+    // on the attachment is what avoids that.
+    const served = resolved.contentType;
+    if (!served) {
+      log.warn(
+        `${LOG_PREFIX} No MIME type provided by the source or the response (${where}), cannot determine format`,
+      );
+      return { drop: DROP_UNTYPED };
+    }
+    const parsedServed = parseMime(served);
+    if (!parsedServed || !topLevel.has(parsedServed.topLevel)) {
+      log.warn(
+        `${LOG_PREFIX} Response type '${forLog(served)}' (${where}) is not one of ${JSON.stringify([...topLevel].sort())} for this attachment`,
+      );
+      return { drop: DROP_UNSUPPORTED_TYPE };
+    }
+    format = mimeToFormat(served, allowed, log, where, parsedServed);
+    if (!format) return { drop: DROP_UNSUPPORTED_TYPE };
+  }
+  return { bytes: resolved.bytes, format };
+}
+
+/**
+ * A Bedrock document name that is unique within a request and stable across
+ * replays of the same content.
+ *
+ * Bedrock requires document names to be unique across the whole request, so a
+ * fixed name makes any message carrying two documents unsendable. Three things
+ * separate the names, and each is load-bearing:
+ *
+ *  - the message id, because one request converts each message separately, so
+ *    a per-conversion counter alone would give byte-identical documents in two
+ *    different messages the same name;
+ *  - the index within that message, which separates byte-identical copies
+ *    attached to the same message;
+ *  - the content digest, which separates two different documents that land at
+ *    the same index of the same message. Replay stability comes from the
+ *    message id and the index, which are what stay the same across replays;
+ *    the digest is what stops two different payloads colliding.
+ *
+ * The name is model-visible, so nothing user-controlled is copied into it; the
+ * message id is hashed rather than interpolated.
+ *
+ * Close to the Python sibling's `_document_name` but not identical: Python
+ * keys a URL-sourced document on the URL string, so its name survives the
+ * remote content changing, while this keys on the bytes actually fetched, so a
+ * changed remote yields a changed name. Both are unique within a request,
+ * which is what the provider requires.
+ */
+function documentName(
+  bytes: Uint8Array,
+  index: number,
+  messageId: string | undefined,
+): string {
+  // `loadCrypto()` is awaited before every call and throws rather than leaving
+  // the module unset, so there is no unloaded case to fall back for.
+  const hash = cryptoModule!.createHash("sha256");
+  const utf8 = new TextEncoder();
+  for (const part of [messageId ?? "direct", String(index)]) {
+    const encoded = utf8.encode(part);
+    // Length-prefixed so two different component splits cannot collide.
+    const length = new Uint8Array(4);
+    new DataView(length.buffer).setUint32(0, encoded.length);
+    hash.update(length);
+    hash.update(encoded);
+  }
+  hash.update(bytes);
+  return `document-${hash.digest("hex").slice(0, 32)}`;
+}
+
+/**
+ * Convert an AG-UI `InputContent` list to Strands `ContentBlock` values,
+ * reporting what could not be converted.
  *
  * Supported types:
  *  - `TextInputContent` -> `TextBlock`
  *  - `ImageInputContent` -> `ImageBlock` (png, jpeg, gif, webp)
  *  - `DocumentInputContent` -> `DocumentBlock` (pdf, csv, doc, docx, xls, xlsx, html, txt, md)
- *  - `VideoInputContent` -> `VideoBlock` (flv, mkv, mov, mpeg, mpg, mp4, three_gp, webm, wmv)
- *  - `AudioInputContent` — skipped (Strands has no audio support).
- *  - Unresolvable items (bad MIME, fetch failure) — skipped.
+ *  - `VideoInputContent` -> `VideoBlock` (flv, mkv, mov, mpeg, mpg, mp4, 3gp, webm, wmv)
+ *  - `AudioInputContent`: skipped (Strands has no audio support).
+ *  - Deprecated `binary` content: mapped to an `ImageBlock`, taking inline
+ *    `data` when present and fetching `url` only when it is absent.
+ *  - Unresolvable items (bad MIME, fetch failure, empty body): skipped and
+ *    reported in `dropped`.
+ *
+ * A result carrying document blocks and no usable text block gains a leading
+ * `TextBlock(" ")`, because Bedrock rejects the request otherwise.
+ *
+ * Pass the same `options.fetchCache` to every conversion made for one request
+ * so a remote attachment is fetched once rather than once per conversion, and
+ * `options.messageId` so document names stay unique across the request.
+ *
+ * @internal not part of the package's public API; `convertAguiContentToStrands`
+ * is the exported entry point.
  */
-export async function convertAguiContentToStrands(
+export async function convertAguiContentToStrandsDetailed(
   content: InputContent[],
   log: Logger = DEFAULT_LOGGER,
-): Promise<ContentBlock[]> {
+  options?: MediaConversionOptions,
+): Promise<MediaConversionResult> {
   const blocks: ContentBlock[] = [];
+  const dropped: DroppedMedia[] = [];
+  let documentIndex = 0;
 
-  for (const item of content) {
+  for (const [itemIndex, item] of content.entries()) {
+    // Two dropped attachments in one conversion are otherwise
+    // indistinguishable in the log.
+    const where = `item ${itemIndex}${options?.messageId ? ` of message ${forLog(options.messageId)}` : ""}`;
+
+    if (!item || typeof item !== "object") {
+      // Logged but not reported, for the same reason a malformed text item is
+      // not: `dropped` is the media report and reaches a client beside a count
+      // of media delivered.
+      log.warn(`${LOG_PREFIX} Skipping content (${where}): not an object`);
+      continue;
+    }
+
+    // A bare `{ text }` with no discriminant is what the SDK's serialized
+    // blocks look like, and `flattenContentToText` already reads them as text.
+    // Falling through to the unknown-type branch reported one to the client as
+    // a lost attachment.
+    if (
+      item.type === undefined &&
+      typeof (item as { text?: unknown }).text === "string"
+    ) {
+      const bare = (item as unknown as { text: string }).text;
+      if (bare.length > 0) blocks.push(new TextBlock(bare));
+      continue;
+    }
+
     if (item.type === "text") {
-      blocks.push(new TextBlock((item as TextInputContent).text));
+      // `text` is typed as a string but arrives off the wire, so a malformed
+      // item must be dropped like any other rather than throwing out of the
+      // whole conversion and taking the other attachments with it. An empty
+      // one is dropped too: the provider rejects an empty block on its own
+      // account, and it carries nothing to lose.
+      const text = (item as TextInputContent).text;
+      if (typeof text === "string" && text.length > 0) {
+        blocks.push(new TextBlock(text));
+      } else if (typeof text !== "string") {
+        // Logged but not reported: `dropped` is the media report, and it
+        // reaches a client next to a count of media blocks delivered. A text
+        // item in it would read as a lost attachment.
+        log.warn(
+          `${LOG_PREFIX} Skipping text (${where}): no usable text field`,
+        );
+      }
       continue;
     }
 
     if (item.type === "image") {
-      const imageItem = item as ImageInputContent;
-      const bytes = await resolveSourceBytes(imageItem.source, log);
-      if (!bytes) continue;
-      const fmt = mimeToFormat(imageItem.source.mimeType, IMAGE_FORMATS, log);
-      if (!fmt) continue;
+      const resolved = await resolveMedia(
+        (item as ImageInputContent).source,
+        IMAGE_FORMATS,
+        IMAGE_TOP_LEVEL,
+        log,
+        options,
+        where,
+      );
+      if ("drop" in resolved) {
+        // resolveMedia has already logged the reason with this item's
+        // context; a second line here would report one drop twice.
+        dropped.push({ type: "image", reason: resolved.drop });
+        continue;
+      }
       blocks.push(
-        new ImageBlock({ format: fmt as ImageFormat, source: { bytes } }),
+        new ImageBlock({
+          format: resolved.format as ImageFormat,
+          source: { bytes: resolved.bytes },
+        }),
       );
       continue;
     }
 
     if (item.type === "document") {
-      const docItem = item as DocumentInputContent;
-      const bytes = await resolveSourceBytes(docItem.source, log);
-      if (!bytes) continue;
-      const fmt = mimeToFormat(docItem.source.mimeType, DOCUMENT_FORMATS, log);
-      if (!fmt) continue;
+      const index = documentIndex++;
+      // Names the digest below. A failure here would otherwise throw out of
+      // the whole conversion, which is the one outcome the drop-and-report
+      // design exists to avoid, so this document is dropped instead.
+      try {
+        await loadCrypto();
+      } catch (e) {
+        log.warn(
+          `${LOG_PREFIX} Skipping document (${where}): the hash used to name it is unavailable`,
+          e,
+        );
+        dropped.push({ type: "document", reason: DROP_UNRESOLVABLE });
+        continue;
+      }
+      const resolved = await resolveMedia(
+        (item as DocumentInputContent).source,
+        DOCUMENT_FORMATS,
+        DOCUMENT_TOP_LEVEL,
+        log,
+        options,
+        where,
+      );
+      if ("drop" in resolved) {
+        // resolveMedia has already logged the reason with this item's
+        // context; a second line here would report one drop twice.
+        dropped.push({ type: "document", reason: resolved.drop });
+        continue;
+      }
       blocks.push(
         new DocumentBlock({
-          format: fmt as DocumentFormat,
-          name: "document",
-          source: { bytes },
+          format: resolved.format as DocumentFormat,
+          name: documentName(resolved.bytes, index, options?.messageId),
+          source: { bytes: resolved.bytes },
         }),
       );
       continue;
     }
 
     if (item.type === "video") {
-      const vidItem = item as VideoInputContent;
-      const bytes = await resolveSourceBytes(vidItem.source, log);
-      if (!bytes) continue;
-      const fmt = mimeToFormat(vidItem.source.mimeType, VIDEO_FORMATS, log);
-      if (!fmt) continue;
+      const resolved = await resolveMedia(
+        (item as VideoInputContent).source,
+        VIDEO_FORMATS,
+        VIDEO_TOP_LEVEL,
+        log,
+        options,
+        where,
+      );
+      if ("drop" in resolved) {
+        // resolveMedia has already logged the reason with this item's
+        // context; a second line here would report one drop twice.
+        dropped.push({ type: "video", reason: resolved.drop });
+        continue;
+      }
       blocks.push(
-        new VideoBlock({ format: fmt as VideoFormat, source: { bytes } }),
+        new VideoBlock({
+          format: resolved.format as VideoFormat,
+          source: { bytes: resolved.bytes },
+        }),
       );
       continue;
     }
 
     if (item.type === "audio") {
       log.warn(
-        `${LOG_PREFIX} Skipping audio content: Strands has no audio support`,
+        `${LOG_PREFIX} Skipping audio (${where}): Strands has no audio support`,
       );
+      dropped.push({ type: "audio", reason: "Strands has no audio support" });
       continue;
     }
 
@@ -1395,23 +1986,59 @@ export async function convertAguiContentToStrands(
         url?: string;
         data?: string;
       };
+      const fmt = mimeToFormat(
+        typeof bin.mimeType === "string" ? bin.mimeType : undefined,
+        IMAGE_FORMATS,
+        log,
+        where,
+      );
+      if (!fmt) {
+        // mimeToFormat has already said why, with this item's context; a
+        // second line here would log one dropped item twice.
+        dropped.push({
+          type: "binary",
+          reason:
+            typeof bin.mimeType === "string" && bin.mimeType
+              ? DROP_UNSUPPORTED_TYPE
+              : DROP_UNTYPED,
+        });
+        continue;
+      }
+      // `data` present but empty, or present and malformed, is a caller
+      // sending nothing rather than a caller asking for the URL. Falling
+      // through would spend a request the message never asked for and then
+      // report the wrong reason, so any present `data` claims the item.
+      const hasInlineData = bin.data !== undefined && bin.data !== null;
       let bytes: Uint8Array | null = null;
-      if (bin.data) {
-        bytes = decodeBase64(bin.data, log);
-      } else if (bin.url) {
-        bytes = await fetchUrlBytes(bin.url, log);
+      let inlineMalformed = false;
+      if (hasInlineData) {
+        if (typeof bin.data !== "string") {
+          inlineMalformed = true;
+        } else if (bin.data) {
+          bytes = decodeBase64(bin.data, log, where);
+          if (!bytes) inlineMalformed = true;
+        } else {
+          bytes = new Uint8Array(0);
+        }
+      } else if (typeof bin.url === "string" && bin.url) {
+        bytes =
+          (await fetchUrlContentCached(bin.url, log, options))?.bytes ?? null;
+      }
+      if (inlineMalformed) {
+        log.warn(`${LOG_PREFIX} Skipping binary (${where}): ${DROP_MALFORMED}`);
+        dropped.push({ type: "binary", reason: DROP_MALFORMED });
+        continue;
       }
       if (!bytes) {
         log.warn(
-          `${LOG_PREFIX} Skipping binary content: could not resolve bytes`,
+          `${LOG_PREFIX} Skipping binary (${where}): ${DROP_UNRESOLVABLE}`,
         );
+        dropped.push({ type: "binary", reason: DROP_UNRESOLVABLE });
         continue;
       }
-      const fmt = mimeToFormat(bin.mimeType, IMAGE_FORMATS, log);
-      if (!fmt) {
-        log.warn(
-          `${LOG_PREFIX} Skipping binary content: unsupported MIME type '${forLog(bin.mimeType)}'`,
-        );
+      if (bytes.length === 0) {
+        log.warn(`${LOG_PREFIX} Skipping binary (${where}): ${DROP_EMPTY}`);
+        dropped.push({ type: "binary", reason: DROP_EMPTY });
         continue;
       }
       blocks.push(
@@ -1421,11 +2048,41 @@ export async function convertAguiContentToStrands(
     }
 
     log.warn(
-      `${LOG_PREFIX} Skipping unknown content type: ${forLog((item as { type?: string }).type)}`,
+      `${LOG_PREFIX} Skipping unknown content type (${where}): ${forLog((item as { type?: string }).type)}`,
     );
+    dropped.push({
+      type: forLog((item as { type?: string }).type, 40),
+      reason: "unknown content type",
+    });
   }
 
-  return blocks;
+  // Bedrock rejects a message that carries document blocks but no text block,
+  // which makes a document-only message unsendable on the live turn and on
+  // every replay of the thread afterwards. The Python sibling inserts the same
+  // single space.
+  if (
+    blocks.some((b) => b instanceof DocumentBlock) &&
+    !blocks.some((b) => b instanceof TextBlock)
+  ) {
+    blocks.unshift(new TextBlock(" "));
+  }
+
+  return { blocks, dropped };
+}
+
+/**
+ * Convert an AG-UI `InputContent` list to Strands `ContentBlock` values.
+ *
+ * See {@link convertAguiContentToStrandsDetailed}, which additionally reports
+ * the items it could not convert.
+ */
+export async function convertAguiContentToStrands(
+  content: InputContent[],
+  log: Logger = DEFAULT_LOGGER,
+  options?: MediaConversionOptions,
+): Promise<ContentBlock[]> {
+  return (await convertAguiContentToStrandsDetailed(content, log, options))
+    .blocks;
 }
 
 /** Extract plain text from AG-UI message content or Strands content blocks. */
@@ -1440,17 +2097,78 @@ export function flattenContentToText(content: unknown): string {
     const parts: string[] = [];
     for (const item of content) {
       if (!item || typeof item !== "object") continue;
-      const typed = item as { type?: string; text?: string };
-      // AG-UI TextInputContent
-      if (typed.type === "text" && typeof typed.text === "string") {
-        parts.push(typed.text);
-      }
-      // Strands TextBlock
-      if (typed.type === "textBlock" && typeof typed.text === "string") {
+      const typed = item as { type?: string; text?: unknown };
+      if (typeof typed.text !== "string") continue;
+      // Three shapes carry text: AG-UI `TextInputContent` (`type: "text"`), a
+      // Strands `TextBlock` instance (`type: "textBlock"`), and the SDK's
+      // SERIALIZED block, which is a bare `{ text }` with no discriminant at
+      // all. `_buildStrandsHistory` emits that third form, so omitting it made
+      // a replayed turn flatten to nothing.
+      if (
+        typed.type === undefined ||
+        typed.type === "text" ||
+        typed.type === "textBlock"
+      ) {
         parts.push(typed.text);
       }
     }
     return parts.join(" ");
   }
+  // A single block rather than a list: same rules, one element.
+  if (typeof content === "object") {
+    return flattenContentToText([content]);
+  }
   return "";
+}
+
+/** Best-effort string view of an AG-UI message content field. */
+export function _coerceText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (content == null) return "";
+  if (Array.isArray(content)) return flattenContentToText(content);
+  return String(content);
+}
+
+/**
+ * Build a Strands `toolResult` content block from an AG-UI tool message body.
+ *
+ * AG-UI's wire shape requires `ToolMessage.content` to be a string. Frontends
+ * (e.g. CopilotKit's `useHumanInTheLoop`) typically JSON-encode structured
+ * results before transport, so the string the adapter receives looks like
+ * `'{"accepted":true,"steps":[...]}'`. Forwarding that as a `text` block leaves
+ * the LLM with two competing payloads: the original `toolUse.input` (full
+ * args) and an opaque-looking JSON string in the result. The model often
+ * defaults to the args.
+ *
+ * Strands' `ToolResultContentData` accepts a `JsonBlock` shape (see
+ * `@strands-agents/sdk` `messages.ts`). When the message content parses as a
+ * JSON object/array, emit it as `{ json: parsed }` so the LLM sees a real
+ * structured result. Fall back to `{ text: ... }` for everything else.
+ */
+export function _buildToolResultContent(
+  content: unknown,
+): { text: string } | { json: unknown } {
+  const text = _coerceText(content);
+  const trimmed = text.trim();
+  // Render-only frontend tools (e.g. CopilotKit `useComponent`) legitimately
+  // produce an empty client tool result. Forwarding an empty `text` block to
+  // the Strands model reaches OpenAI, which rejects tool messages with empty
+  // content (HTTP 400). Synthesize a non-empty acknowledgement instead. The
+  // Python adapter has no equivalent synthesis on either its history or its
+  // reconciliation path, so it still forwards the empty block; that divergence
+  // is deliberate here rather than drift. The UI-bound TOOL_CALL_RESULT event is
+  // emitted on a separate path and stays faithfully empty.
+  if (trimmed.length === 0)
+    return { text: "Tool executed successfully with no return value." };
+  const first = trimmed[0];
+  if (first !== "{" && first !== "[") return { text };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed !== null && typeof parsed === "object") {
+      return { json: parsed };
+    }
+  } catch {
+    // Not valid JSON, so fall through to text.
+  }
+  return { text };
 }

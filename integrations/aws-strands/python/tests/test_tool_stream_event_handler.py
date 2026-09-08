@@ -3,6 +3,8 @@
 Covers:
   1. Happy path — events yielded by the handler are forwarded into the stream.
   2. Handler raises — warning is logged, stream continues without crashing.
+     The ``hook_error`` event that failure also puts on the wire is covered by
+     test_hook_error_events.py, which owns that contract.
   3. No handler + {"state": ...} payload — default StateSnapshotEvent is emitted.
   4. No handler + non-state payload — nothing extra emitted, no crash.
   5. Missing toolUseId — handler is NOT called, stream continues cleanly.
@@ -271,8 +273,6 @@ async def test_context_fields_populated():
     ]
 
     agent = _build_agent(stream_events, config)
-    await agent.run(_make_input()).__anext__()  # prime the generator
-    # Collect all events to drive the generator to completion
     events = [e async for e in agent.run(_make_input())]
 
     assert len(captured) == 1

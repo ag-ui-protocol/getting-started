@@ -1,16 +1,18 @@
 # Interrupt (Suspend / Resume)
 
 Demonstrates **native interrupt-based Human-in-the-Loop** built on a framework's
-own suspend/resume primitive, bridged onto AG-UI's `on_interrupt` event and
-rendered with CopilotKit's v2 `useInterrupt` hook.
+own suspend/resume primitive, surfaced over AG-UI and rendered with CopilotKit's
+v2 `useInterrupt` hook.
 
 ## Flow
 
 1. The user asks the agent to book a meeting.
 2. The agent calls a backend tool (`schedule_meeting`) that **suspends its own
    execution** mid-tool, emitting the meeting context to the frontend.
-3. The adapter surfaces this as a CUSTOM `on_interrupt` event. `useInterrupt`
-   captures it and renders an in-chat time picker.
+3. The adapter surfaces this pause, either as a CUSTOM `on_interrupt` event or
+   as `RUN_FINISHED.outcome = { type: "interrupt" }`, depending on the
+   framework. `useInterrupt` captures either and renders an in-chat time
+   picker.
 4. The user picks a slot (or cancels). `resolve(...)` sends the choice back and
    **resumes the suspended tool**, which returns a confirmation the agent
    summarizes.
@@ -25,3 +27,16 @@ Resume works for local agents (via the agent resume stream) and for remote
 agents (round-tripped over `@mastra/client-js`' `resumeStream`). Remote resume
 requires the remote Mastra instance to have storage configured, since the
 suspended run's snapshot is loaded from storage on resume.
+
+## AWS Strands notes
+
+Wired for both **AWS Strands (Python)** and **AWS Strands (TypeScript)**. The
+backend tool pauses through the Strands tool context's `interrupt(reason=...)`,
+and both bridges publish that pause on the standard channel:
+`RUN_FINISHED.outcome = { type: "interrupt" }`, with the `reason` argument
+carried verbatim under the interrupt's `metadata.reason`. No CUSTOM event is
+emitted, and the renderer reads the topic and attendee from there.
+
+Resume is keyed by `threadId` and needs no extra storage in these demos, since
+the pause and the resume land on the same live agent in the same process. A
+durable, cross-process resume requires a Strands `SessionManager`.

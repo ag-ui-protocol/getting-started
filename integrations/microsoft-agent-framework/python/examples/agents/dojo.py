@@ -10,6 +10,7 @@ each of the AG-UI dojo features:
 - Tool-based Generative UI
 - Shared State
 - Predictive State Updates
+- A2UI (agent-generated UI): fixed schema, dynamic schema, advanced, recovery
 
 All agent implementations are from the agent-framework-ag-ui package examples.
 Reference: https://github.com/microsoft/agent-framework/tree/main/python/packages/ag-ui/examples/agents
@@ -21,12 +22,17 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from agent_framework.openai import OpenAIChatClient
+from agent_framework.openai import OpenAIChatClient, OpenAIChatCompletionClient
 # TODO: Uncomment this when we have a way to authenticate with Azure
 # from azure.identity import DefaultAzureCredential
 # from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework_ag_ui import add_agent_framework_fastapi_endpoint
 from agent_framework_ag_ui_examples.agents import (
+    A2UI_DEMO_CONFIG,
+    a2ui_advanced_agent,
+    a2ui_dynamic_schema_agent,
+    a2ui_fixed_schema_agent,
+    a2ui_recovery_agent,
     document_writer_agent,
     human_in_the_loop_agent,
     recipe_agent,
@@ -114,6 +120,43 @@ add_agent_framework_fastapi_endpoint(app, recipe_agent(chat_client), "/shared_st
 
 # Predictive State Updates - document_writer_agent
 add_agent_framework_fastapi_endpoint(app, document_writer_agent(chat_client), "/predictive_state_updates")
+
+# --- A2UI (agent-generated UI) demos ---------------------------------------
+# A2UI surface streaming needs a Chat-Completions client: it emits render_a2ui argument
+# deltas per chunk (progressive paint) and replays the balancing tool result cleanly,
+# where the Responses path buffers. Use a dedicated OpenAIChatCompletionClient when
+# OPENAI_API_KEY is set; otherwise fall back to the shared client with a warning
+# (streaming may not paint incrementally).
+if api_key:
+    a2ui_client = OpenAIChatCompletionClient(
+        model=deployment_name or os.getenv("OPENAI_CHAT_MODEL_ID", "gpt-4o"),
+        api_key=api_key,
+    )
+else:
+    print("WARNING: OPENAI_API_KEY not set; A2UI demos fall back to the shared client and may not stream incrementally")
+    a2ui_client = chat_client
+
+# Dynamic schema - subagent generates a surface against the dojo catalog.
+add_agent_framework_fastapi_endpoint(
+    app,
+    a2ui_dynamic_schema_agent(a2ui_client),
+    "/a2ui_dynamic_schema",
+    a2ui_config=A2UI_DEMO_CONFIG,
+)
+
+# Advanced - zero-config: no backend catalog/guide; the catalog arrives on forwardedProps.
+add_agent_framework_fastapi_endpoint(app, a2ui_advanced_agent(a2ui_client), "/a2ui_advanced")
+
+# Recovery - validate/retry loop; structural validation drives regeneration.
+add_agent_framework_fastapi_endpoint(
+    app,
+    a2ui_recovery_agent(a2ui_client),
+    "/a2ui_recovery",
+    a2ui_config=A2UI_DEMO_CONFIG,
+)
+
+# Fixed schema - direct backend tool returns a pre-authored a2ui_operations envelope.
+add_agent_framework_fastapi_endpoint(app, a2ui_fixed_schema_agent(a2ui_client), "/a2ui_fixed_schema")
 
 
 def main():

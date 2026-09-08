@@ -45,6 +45,13 @@ test.describe("Interrupt Feature", () => {
     await expect(picker).toBeVisible({ timeout: 30_000 });
     await expect(picker.getByRole("button").first()).toBeEnabled();
 
+    // The card asks the question the paused tool asked. Both values reach the
+    // renderer only through the interrupt's own payload, so a card carrying the
+    // page's placeholder heading instead means that payload was dropped between
+    // the tool and the user, and the pause asks about nothing in particular.
+    await expect(picker).toContainText("Intro call to discuss pricing");
+    await expect(picker).toContainText("with the sales team");
+
     // The tool has NOT returned: the paused run carries no tool result at all,
     // and it ends on the interrupt outcome rather than a plain finish. Asserted
     // on the wire because the chat cannot show this: no assistant text is

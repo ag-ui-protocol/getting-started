@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { AgentConfig, Plugin } from "@strands-agents/sdk";
 import { StrandsAgent } from "../agent";
-import { collect } from "./helpers";
+import { collect, minimalRunInput } from "./helpers";
 
 const capturedConfigs: AgentConfig[] = [];
 
@@ -106,14 +106,125 @@ describe("AgentConfig forwarding", () => {
     expect(cfg.modelState).toEqual({ responseId: "abc" });
   });
 
-  it("forwards traceAttributes, structuredOutputSchema, toolExecutor", async () => {
+  it("forwards toolExecutor but not structuredOutputSchema or traceAttributes", async () => {
     capturedConfigs.length = 0;
     const sa = new StrandsAgent({ agent: richTemplate(), name: "t" });
     await collect(sa);
     const cfg = capturedConfigs.at(-1)!;
-    expect(cfg.traceAttributes).toEqual({ team: "agui" });
-    expect(cfg.structuredOutputSchema).toBeDefined();
     expect(cfg.toolExecutor).toBe("concurrent");
+    // structuredOutputSchema is deliberately left behind. Carrying it makes
+    // Strands inject its structured-output tool, which this adapter streams to
+    // the client as a visible tool call and which fails a plain text turn when
+    // the model does not call it. A real Agent keeps the schema under a
+    // private name that the previous field list never read, so it has never
+    // reached a per-thread agent in practice; this pins that.
+    expect(cfg.structuredOutputSchema).toBeUndefined();
+    // traceAttributes goes to the tracer the Agent builds, and the Agent keeps
+    // nothing under this name. Recovering it meant matching a name against
+    // whatever objects the Agent held, which found coincidences too, so it is
+    // declared unsupported rather than guessed at.
+    expect(cfg.traceAttributes).toBeUndefined();
+  });
+
+  it("warns about template settings it will not carry", async () => {
+    // The point of declaring a field unsupported is that the caller finds out.
+    // This template sets several of them plainly, so each is readable and
+    // therefore demonstrably chosen rather than an SDK default.
+    //
+    // Said when the first per-thread agent is built, not at construction: a
+    // caller can supply any of these through threadAgentConfig, and at
+    // construction that hook has not run, so warning then would nag callers
+    // who had already handled it.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const sa = new StrandsAgent({ agent: richTemplate(), name: "t" });
+      expect(warn).not.toHaveBeenCalled();
+
+      await collect(sa);
+
+      const said = warn.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(said).toContain("traceAttributes");
+      expect(said).toContain("structuredOutputSchema");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("stays quiet about a setting the per-thread hook supplies", async () => {
+    // Acting on the warning has to make it stop, otherwise it is noise that
+    // teaches callers to ignore it.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const sa = new StrandsAgent({
+        agent: richTemplate(),
+        name: "t",
+        config: {
+          threadAgentConfig: () =>
+            ({ traceAttributes: { team: "agui" } }) as never,
+        },
+      });
+      await collect(sa);
+
+      const said = warn.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(said).not.toContain("traceAttributes");
+      // The one it did not supply is still named.
+      expect(said).toContain("structuredOutputSchema");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns a later thread that omits what an earlier thread supplied", async () => {
+    // The report is one-shot so a busy adapter does not repeat itself, but
+    // one-shot has to mean per setting, not per adapter. A thread that
+    // supplies everything must not buy silence for a thread that supplies
+    // nothing: the second thread really does lose those settings.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const sa = new StrandsAgent({
+        agent: richTemplate(),
+        name: "t",
+        config: {
+          threadAgentConfig: (input) =>
+            input.threadId === "supplies-everything"
+              ? ({
+                  traceAttributes: { team: "agui" },
+                  structuredOutputSchema: { type: "zod-placeholder" },
+                } as never)
+              : ({} as never),
+        },
+      });
+
+      await collect(sa, minimalRunInput({ threadId: "supplies-everything" }));
+      const afterFirst = warn.mock.calls.length;
+      await collect(sa, minimalRunInput({ threadId: "supplies-nothing" }));
+
+      const said = warn.mock.calls
+        .slice(afterFirst)
+        .map((c) => String(c[0]))
+        .join("\n");
+      expect(said).toContain("traceAttributes");
+      expect(said).toContain("structuredOutputSchema");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not repeat a warning it has already given", async () => {
+    // The other half of one-shot: two threads that both omit the same setting
+    // are told once, not once each.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const sa = new StrandsAgent({ agent: richTemplate(), name: "t" });
+
+      await collect(sa, minimalRunInput({ threadId: "first" }));
+      const afterFirst = warn.mock.calls.length;
+      await collect(sa, minimalRunInput({ threadId: "second" }));
+
+      expect(warn.mock.calls.length).toBe(afterFirst);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("omits optional fields entirely when the template doesn't set them", async () => {
@@ -174,6 +285,57 @@ describe("AgentConfig forwarding", () => {
     const cfg = capturedConfigs.at(-1)!;
     expect(cfg.name).toBe("my-template-agent");
     expect(cfg.plugins).toEqual([plugin]);
+  });
+
+  it("carries a field a newer SDK keeps in a registry", async () => {
+    // Fields added after this package was built cannot appear in the
+    // compile-time table, so they are classified separately and read at
+    // runtime. `interventions` is the one that matters: it turns on native
+    // human-in-the-loop, and the SDK consumes it into a registry rather than
+    // keeping it under its own name.
+    //
+    // The template here is hand-built because the locked SDK predates the
+    // field; the shape mirrors what a current Agent holds.
+    capturedConfigs.length = 0;
+    const handler = { name: "approve" };
+    const template = {
+      ...richTemplate(),
+      _interventionRegistry: { _handlers: [handler] },
+    } as unknown as import("@strands-agents/sdk").Agent;
+
+    const sa = new StrandsAgent({ agent: template, name: "t" });
+    await collect(sa);
+
+    const cfg = capturedConfigs.at(-1)! as AgentConfig & {
+      interventions?: unknown[];
+    };
+    expect(cfg.interventions).toHaveLength(1);
+    // The handler object itself, not a copy: the registry holds the caller's
+    // own objects and that is what the next agent has to register.
+    expect(cfg.interventions?.[0]).toBe(handler);
+  });
+
+  it("does not forward plugins found on the template itself", async () => {
+    // Plugins reach per-thread agents only through the explicit option above.
+    // A template's own plugins are registered against the template alongside
+    // Strands' built-ins, and a second Agent refuses to register a built-in
+    // twice, so carrying them across breaks construction.
+    //
+    // A real Agent keeps plugins somewhere this adapter does not read, so the
+    // template here exposes them plainly: that is what makes the assertion
+    // able to fail if the field is ever reclassified as copyable.
+    capturedConfigs.length = 0;
+    const plugin: Plugin = { name: "on-template", initAgent: () => {} };
+    const template = {
+      ...richTemplate(),
+      plugins: [plugin],
+    } as unknown as import("@strands-agents/sdk").Agent;
+
+    const sa = new StrandsAgent({ agent: template, name: "t" });
+    await collect(sa);
+
+    const cfg = capturedConfigs.at(-1)!;
+    expect(cfg.plugins).toBeUndefined();
   });
 
   it("forwards the Model instance, preserving provider-specific config like Bedrock thinking", async () => {

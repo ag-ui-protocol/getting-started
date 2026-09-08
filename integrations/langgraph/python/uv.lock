@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "ag-ui-langgraph"
-version = "0.0.43"
+version = "0.0.44"
 source = { editable = "." }
 dependencies = [
     { name = "ag-ui-a2ui-toolkit" },
@@ -59,7 +59,7 @@ dev = [
 
 [[package]]
 name = "ag-ui-protocol"
-version = "0.1.20"
+version = "0.1.22"
 source = { directory = "../../../sdks/python" }
 dependencies = [
     { name = "pydantic" },

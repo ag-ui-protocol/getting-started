@@ -884,7 +884,12 @@ describe.each(interruptShapes)(
         );
         // The answered sibling is neither demanded nor re-submitted.
         expect(submittedInterruptAnswers()).toEqual([
-          [{ interruptId: "int-open", response: { environment: "prod" } }],
+          [
+            {
+              interruptId: "int-open",
+              response: { response: { environment: "prod" } },
+            },
+          ],
         ]);
       },
     );
@@ -1022,13 +1027,14 @@ describe("A resume the SDK parked after recording its answers", () => {
     expect(events.some((event) => event.type === EventType.RUN_ERROR)).toBe(
       false,
     );
-    // The terminal finish carries no outcome, which is what separates a run
-    // Strands actually completed from the fingerprint shortcut's synthetic
-    // success outcome and from the interrupt variant of a run still parked.
+    // A plain success finish, not the interrupt variant of a run still
+    // parked. The parked tool's output above is what separates this from the
+    // fingerprint shortcut, which emits no text.
     expect(events[events.length - 1]).toEqual({
       type: EventType.RUN_FINISHED,
       threadId: "cold-thread-parked-replay",
       runId: "run-1",
+      outcome: { type: "success" },
     });
     // The SDK cleared its own checkpoint once the parked work succeeded, and
     // the adapter never reached for it.
@@ -1076,11 +1082,13 @@ describe("A resume the SDK parked after recording its answers", () => {
       [{ interruptId: INTERRUPT_ID, response: { approved: true } }],
     ]);
     expect(emittedText(events)).toEqual([PARKED_OUTPUT]);
-    // No outcome, so this finish came from Strands rather than the shortcut.
+    // The two submitted answer batches and the parked output above are what
+    // show this finish came from Strands rather than the shortcut.
     expect(events[events.length - 1]).toEqual({
       type: EventType.RUN_FINISHED,
       threadId: THREAD,
       runId: "run-2",
+      outcome: { type: "success" },
     });
     expect(checkpoint.activated).toBe(false);
   });

@@ -2,6 +2,8 @@ from typing import TypedDict, Optional, List, Any, Dict, Set, Union, Literal
 from typing_extensions import NotRequired
 from enum import Enum
 
+from ag_ui.core import TokenUsage
+
 class LangGraphEventTypes(str, Enum):
     OnChainStart = "on_chain_start"
     OnChainStream = "on_chain_stream"
@@ -19,6 +21,48 @@ class CustomEventNames(str, Enum):
     ManuallyEmitMessage = "manually_emit_message"
     ManuallyEmitToolCall = "manually_emit_tool_call"
     ManuallyEmitState = "manually_emit_state"
+
+    # Advisory only — this does NOT terminate the stream.
+    #
+    # Unlike the ``ManuallyEmit*`` members above, which the bridge additionally
+    # translates into specific AG-UI events, ``Exit`` has no special-case branch: it
+    # is only forwarded, as ``CUSTOM(name="exit")`` — the same treatment any
+    # unrecognised custom event name gets. Graphs dispatch it with
+    # ``adispatch_custom_event(CustomEventNames.Exit.value, ...)``.
+    #
+    # The run then ends however it would have ended anyway: the exit event changes
+    # nothing about in-flight work or the terminal sequence. On the normal end-node
+    # path, with a step open, that sequence is STEP_FINISHED, STATE_SNAPSHOT,
+    # MESSAGES_SNAPSHOT, RUN_FINISHED, and an open message or tool call is closed
+    # first. Runs that end another way differ — the interrupt path closes the step
+    # after the snapshots; the error path ends at RUN_ERROR without the snapshots and
+    # without closing an in-flight message — but that is true with or without an exit
+    # event.
+    #
+    # Forwarding is subject to subagent visibility: under
+    # ``subagent_visibility="hidden"``, an exit dispatched from inside a subagent
+    # window is withheld along with the rest of that subagent's stream, because
+    # ``EventType.CUSTOM`` is one of ``agent.py``'s
+    # ``_SUBAGENT_ATTRIBUTABLE_EVENT_TYPES``. Nothing in the hidden-mode contract
+    # suite covered CUSTOM before PNI-386; ``test_exit_custom_event.py`` now records
+    # the drop as current behavior rather than endorsed contract. Whether an advisory
+    # signal should be exempt is a question for the subagent-visibility design, not
+    # for this contract.
+    #
+    # It is deliberately not a stream terminator. LangGraph never inspects custom
+    # event names — its only handler (``pregel/_retry.py``) is a timeout keepalive
+    # that discards its arguments — so the
+    # graph keeps running regardless, and honoring exit as a terminator would abandon
+    # a live graph with its checkpoint left at whatever super-step it last completed.
+    #
+    # The name is inherited from CopilotKit; AG-UI has no equivalent field. Clients
+    # may act on it (e.g. releasing an agent lock); nothing in this repo does today.
+    # The CrewAI integration's ``copilotkit_exit`` is the same advisory idea — note
+    # it spells the event name ``"Exit"``, not ``"exit"``, so one string comparison
+    # will not match both integrations.
+    #
+    # ``tests/test_exit_custom_event.py`` pins the forwarding, the non-termination,
+    # the normal- and interrupt-path terminal order, and the per-visibility behavior.
     Exit = "exit"
 
 State = Dict[str, Any]
@@ -193,6 +237,21 @@ RunMetadata = TypedDict("RunMetadata", {
     # only tool_call_id, no parent_message_id/subagent_run_id) back to the owning
     # assistant entry in subagent_messages. Maps tool_call_id -> message id.
     "subagent_tool_call_owner": NotRequired[Dict[str, str]],
+    # Provider-reported token usage, ONE ENTRY PER MODEL CALL, in the order the
+    # calls reported it. Appended from each OnChatModelStream chunk that carries
+    # `usage_metadata`, and folded into one entry per (provider, model) by
+    # LangGraphAgent._collect_run_usage at the terminal event. Kept per-call
+    # rather than pre-summed so a run invoking several models keeps them
+    # separate — aggregation is the SDK's job (aggregate_token_usage), shared
+    # with the TypeScript producer so both languages emit the same shape.
+    "usage": NotRequired[List[TokenUsage]],
+    # LangGraph run ids of the model calls that already contributed a usage
+    # entry. Usage arrives on TWO channels and a call can use either or both:
+    # the final OnChatModelStream chunk, and the aggregated OnChatModelEnd
+    # output. A streaming provider reports it on both, under the SAME run id —
+    # so without this set, every streamed call would be counted twice. The
+    # model-end fallback consults it; the streaming path only populates it.
+    "usage_run_ids": NotRequired[Set[Optional[str]]],
 })
 
 # run_id -> lane -> in-flight message/tool-call record. The inner "lane" key is

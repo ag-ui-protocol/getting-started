@@ -93,6 +93,11 @@ from ag_ui.core.types import (
     InputContentPart,
 )
 
+from ag_ui.core.token_usage import (
+    token_usage_from_langchain_metadata,
+    aggregate_token_usage,
+)
+
 from ag_ui.core.capabilities import (
     SubAgentInfo,
     IdentityCapabilities,
@@ -155,6 +160,9 @@ __all__ = [
     "RunFinishedOutcome",
     "RunFinishedSuccessOutcome",
     "TokenUsage",
+    # Token usage mapping / aggregation
+    "token_usage_from_langchain_metadata",
+    "aggregate_token_usage",
     "RunFinishedInterruptOutcome",
     "SubagentStartedEvent",
     "SubagentFinishedEvent",

@@ -1,10 +1,13 @@
 /**
- * aimock fixtures for the AWS Strands interrupt and predictive-state demos.
+ * aimock fixtures for the AWS Strands interrupt, predictive-state and citations
+ * demos.
  *
- * Both flows make more than one model call per user turn, and the responses
- * differ by where in the flow the call happens rather than by the user's text,
- * so they need predicates rather than the `userMessage` entries in
- * fixtures/openai/*.json.
+ * The interrupt and predictive-state flows make more than one model call per
+ * user turn, and the responses differ by where in the flow the call happens
+ * rather than by the user's text, so they need predicates rather than the
+ * `userMessage` entries in fixtures/openai/*.json. The citations demo needs a
+ * predicate for a different reason: its answers carry `citations`, and only
+ * this demo's turns may.
  *
  * Every predicate is scoped to a phrase unique to the Strands demo's own system
  * prompt, so these never intercept another framework's demo (Mastra drives a
@@ -194,7 +197,164 @@ export function strandsAnswersToolResultTurn(
   return strandsToolResultReply(req) !== null;
 }
 
+// ---------------------------------------------------------------------------
+// Citations: the demo asks a research agent to answer over web sources, and the
+// adapter folds what the model cites onto the message it annotates. aimock
+// replays those as `url_citation` annotations on the Responses API, which is
+// the one shape both Strands bridges map to a citation.
+// ---------------------------------------------------------------------------
+
+const IS_STRANDS_CITATIONS = (req: ChatCompletionRequest) =>
+  /grounding what you say in what you find/i.test(systemText(req.messages));
+
+/**
+ * A citation whose offsets are derived from where `quote` sits in `content`.
+ *
+ * The end offset is also where aimock emits the annotation, so deriving it from
+ * the quote puts each citation on the wire at the point the text it cites has
+ * streamed, the way the real API does. Writing the numbers out by hand would
+ * decouple them from the answer and silently drift the moment either is edited.
+ */
+const citing = (
+  content: string,
+  quote: string,
+  url: string,
+  title: string,
+): {
+  url: string;
+  title: string;
+  citedText: string;
+  startIndex: number;
+  endIndex: number;
+} => {
+  const at = content.indexOf(quote);
+  if (at === -1) {
+    throw new Error(`citation quote is not in the answer it cites: ${quote}`);
+  }
+  return {
+    url,
+    title,
+    citedText: quote,
+    startIndex: at,
+    endIndex: at + quote.length,
+  };
+};
+
+/** One cited answer: the text, plus the sources it is grounded in. */
+const citedAnswer = (
+  content: string,
+  sources: [quote: string, url: string, title: string][],
+) => ({
+  content,
+  citations: sources.map(([quote, url, title]) =>
+    citing(content, quote, url, title),
+  ),
+});
+
+const HTTP3_VS_HTTP2 = citedAnswer(
+  "HTTP/3 runs over QUIC instead of TCP, so one lost packet no longer stalls " +
+    "every other stream sharing the connection. It also folds the TLS " +
+    "handshake into the transport handshake, which removes a round trip from " +
+    "connection setup that HTTP/2 over TLS still pays.",
+  [
+    [
+      "HTTP/3 runs over QUIC instead of TCP",
+      "https://developer.mozilla.org/en-US/docs/Glossary/HTTP_3",
+      "HTTP/3 - MDN Web Docs Glossary",
+    ],
+    [
+      "folds the TLS handshake into the transport handshake",
+      "https://www.rfc-editor.org/rfc/rfc9114.html",
+      "RFC 9114: HTTP/3",
+    ],
+  ],
+);
+
+const WHAT_IS_HTTP3 = citedAnswer(
+  "HTTP/3 is the third major version of HTTP, carried over QUIC rather than " +
+    "TCP. It keeps the semantics of HTTP/2 and changes the transport " +
+    "underneath, which is where its latency and head-of-line-blocking wins " +
+    "come from.",
+  [
+    [
+      "the third major version of HTTP",
+      "https://www.rfc-editor.org/rfc/rfc9114.html",
+      "RFC 9114: HTTP/3",
+    ],
+    [
+      "keeps the semantics of HTTP/2",
+      "https://developer.mozilla.org/en-US/docs/Glossary/HTTP_3",
+      "HTTP/3 - MDN Web Docs Glossary",
+    ],
+  ],
+);
+
+const WHAT_IS_QUIC = citedAnswer(
+  "QUIC is a transport protocol built on UDP that provides multiplexed " +
+    "streams with TLS 1.3 built in. Because each stream is independent, a " +
+    "packet lost on one does not block delivery on the others.",
+  [
+    [
+      "a transport protocol built on UDP",
+      "https://www.rfc-editor.org/rfc/rfc9000.html",
+      "RFC 9000: QUIC",
+    ],
+    [
+      "each stream is independent",
+      "https://developer.mozilla.org/en-US/docs/Glossary/QUIC",
+      "QUIC - MDN Web Docs Glossary",
+    ],
+  ],
+);
+
+const JAMES_WEBB = citedAnswer(
+  "Webb observes on a schedule set by its approved programmes, which cover " +
+    "targets from planets in our own solar system to the earliest galaxies. " +
+    "The current programme list and observing plan are published by the " +
+    "institute that operates the telescope.",
+  [
+    [
+      "a schedule set by its approved programmes",
+      "https://www.stsci.edu/jwst/science-execution/observing-schedules",
+      "JWST Observing Schedules",
+    ],
+    [
+      "the earliest galaxies",
+      "https://science.nasa.gov/mission/webb/",
+      "NASA: James Webb Space Telescope",
+    ],
+  ],
+);
+
+/**
+ * The answer for a citations-demo turn.
+ *
+ * Every turn in this demo gets a cited answer, including one this file does not
+ * recognise: an uncited fallback would leave a human clicking around the demo
+ * looking at the empty state and reading it as the feature being broken.
+ */
+function strandsCitationsAnswer(req: ChatCompletionRequest) {
+  const asked = lastUserText(req.messages);
+  if (/differ/i.test(asked) && /HTTP\/2/i.test(asked)) return HTTP3_VS_HTTP2;
+  if (/HTTP\/3/i.test(asked)) return WHAT_IS_HTTP3;
+  if (/QUIC/i.test(asked)) return WHAT_IS_QUIC;
+  if (/webb/i.test(asked)) return JAMES_WEBB;
+  return WHAT_IS_HTTP3;
+}
+
 export function registerStrandsFixtures(mockServer: LLMock): void {
+  // Citations. One fixture for the whole demo: which answer comes back is the
+  // question the request asks, not which fixture matched, so the routing lives
+  // in one function rather than spread across near-identical registrations
+  // whose ordering would then be load-bearing.
+  mockServer.addFixture({
+    match: {
+      endpoint: "chat",
+      predicate: IS_STRANDS_CITATIONS,
+    },
+    response: (req) => strandsCitationsAnswer(req),
+  });
+
   // The page's second suggestion pill. Registered ahead of the default booking
   // below so clicking it proposes the meeting it actually names.
   mockServer.addFixture({

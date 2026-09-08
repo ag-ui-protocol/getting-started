@@ -1,0 +1,193 @@
+---
+title: "Processing Model"
+description: "What survives, what is fatal, and where middleware sits relative to enforcement — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Two things look superficially alike and must never be confused: material the
+protocol does not describe, and a value the protocol does describe that is
+wrong. The first is how the protocol grows. The second is a bug.
+
+## The rule
+
+**Unrecognised material is not an error. A malformed known value is.**
+
+- An event of a type this implementation does not recognise MUST NOT abort the
+  run.
+- A property that is not described on an event MUST NOT abort the run.
+- A union member the implementation does not recognise — a content part of a new
+  kind, an outcome named after it shipped — MUST NOT abort the run.
+- A field the protocol DOES describe, carrying a value the schema rejects, MUST
+  be fatal: the consumer MUST fail the run rather than repair, coerce or ignore
+  the value.
+
+The reasoning is asymmetric on purpose. An event type added after an
+implementation shipped is expected — the sender is newer, and the older party
+has no basis to call it invalid. But `messageId` holding a number is not a newer
+protocol; it is a defect, and a consumer that quietly coerces it hides the defect
+until it surfaces as something harder to diagnose.
+
+## Every transport answers the same way
+
+These rules bind the protocol, not a wire format. A consumer that supports more
+than one transport MUST reach the same verdict on the same event however it
+arrived: if a stream survives as JSON, it MUST survive as protobuf, and if it
+fails, it MUST fail the same way — except where the binary encoding itself
+cannot express the difference the verdict turns on, the two cases this page
+names below (the unnameable envelope variant, and the absences protobuf
+materialises).
+
+That puts a limit on what a reader may decide for itself. Turning bytes into
+events is the reader's whole job — a frame whose bytes map to no event at all is
+a decode failure, and that judgement is properly the reader's. Whether a
+successfully read event carries something the implementation recognises is not:
+that question belongs to the one stage every transport shares. A reader that
+also validates makes its transport strictly harsher than the others, and a
+producer's choice of content type then decides whether a run survives.
+
+The binary case needs one accommodation. A text reader can hand on an event of
+an unknown type, because the type travels as a string and the shared stage can
+drop it by name. A binary reader cannot: an envelope variant it was not compiled
+against carries no name to hand on. Such a frame MUST be dropped, with a
+warning, rather than failing the run — that is the same answer the shared stage
+would have given, spelled for a transport that cannot defer the question.
+
+<Note>
+  A binary encoding cannot honour this wherever it gives a field no presence.
+  In protobuf that covers required scalars and required lists alike: a required
+  string a producer omitted arrives as an empty string, a required array as an
+  empty array, and each is accepted where the same event as JSON is rejected as
+  malformed. The schema already forbids omitting them, so this changes how a
+  defective producer is diagnosed rather than what a conformant one may send.
+</Note>
+
+## What a consumer does with unrecognised material
+
+A consumer that exposes events to application code MUST NOT deliver unrecognised
+material as though the protocol described it. Having read it, such a consumer
+MUST do one of:
+
+- **Drop it**, if the whole event is of an unrecognised type. The consumer
+  SHOULD emit a warning naming the type.
+- **Strip it**, if it is an unknown property or an unrecognised union member on
+  an otherwise valid event. The consumer SHOULD emit a warning naming the path
+  that was removed.
+
+A consumer MUST NOT let a stripped property survive into the value application
+code receives, and MUST NOT let a dropped event reach it at all.
+
+This applies only where the schema closes an object, which is everywhere it
+describes one of the protocol's own. Where the schema deliberately leaves an
+object open, a member it does not describe is not unrecognised material at all
+and MUST be preserved. The JSON Patch operations are the case: RFC 6902 section
+4 requires an operation to ignore members it does not define rather than reject
+them, so a `remove` carrying a leftover `value` is a valid patch and arrives
+whole. A consumer that strips there deletes conformant data, and the warning it
+emits is about nothing.
+
+This binds the pipeline, not the parser. A library layer that only parses an
+event — the generated models in each SDK, say — keeps unknown properties on
+purpose, so that the middleware above it can still see them. An SDK that offers
+such a parser without an enforcement stage does not yet satisfy this rule; today
+that is Python and .NET, whose models parse leniently with no stage that strips
+before application code.
+
+<Note>
+  One case is not yet met by the reference implementation: a field whose schema
+  is a closed set of string values — a message `role`, for instance — is checked
+  as a leaf, so an unrecognised value there is fatal rather than stripped. The
+  .NET converters reject an unknown role or outcome the same way. The rule above
+  is what the protocol requires; both are gaps against it rather than a softening
+  of it.
+</Note>
+
+Stripping reaches all the way down, and what it removes depends on where the
+unrecognisable value sits:
+
+- In an **optional** position, that field is removed and everything around it
+  survives.
+- In a **required** position, the value *containing* it is removed instead. A
+  media part whose source is of a kind this implementation has never heard of is
+  removed whole — leaving a part behind with no source would hand the validator
+  something it must treat as malformed, turning an addition into a fatal error.
+- Inside a **list**, the unrecognisable element is dropped and the list survives.
+
+## Where middleware sits
+
+Middleware — anything a consumer installs to translate, observe or rewrite the
+stream — MUST run before enforcement, and enforcement MUST run before
+verification and before application code sees anything.
+
+```
+producer → compatibility boundary → middleware → enforcement
+         → chunk expansion → verification → application
+```
+
+The compatibility boundary is the always-on translator for shapes the protocol
+has retired. It MUST see the stream first, because a retired shape can be a
+chunk, and a stage that met it earlier would either fail on it or turn it into
+something the boundary can no longer recognise. A middleware *chain* MAY
+expand chunks between its own stages, so that each stage receives the
+start/content/end form — the reference implementation's chaining helper does
+exactly that. A middleware therefore MUST be prepared for either form: what it
+sees depends on where in the chain it sits.
+
+Expansion between stages narrows one guarantee, and the narrowing is stated
+rather than hidden: expansion synthesizes events carrying only what the
+protocol defines, so unrecognised fields *on a chunk* survive to enforcement —
+and earn their warning — only on the canonical order above. A chain that
+expands early loses them silently. A conforming producer never emits such
+fields, so what is lost is material from a newer protocol version crossing a
+chain that expands early. The material expansion exists to deliver — deltas,
+opener fields, metadata, `rawEvent`, attribution — is carried through intact;
+a chunk's `timestamp` is not, because the synthesized events are not the
+chunk, and like unknown fields it is judged before expansion only on the
+canonical order.
+
+A chunk is an event in its own right, and it MUST be judged as one: whichever
+stage meets a malformed chunk first — enforcement on the canonical order
+above, expansion where a middleware chain expands early — MUST reject it
+rather than repair it, and MUST NOT normalise, default or conceal a malformed
+known value enforcement would reject. A consumer that substituted a default
+for a malformed role made the same producer defect fatal when sent plainly and
+invisible when sent as a chunk, so which form a producer happened to use
+decided whether its bug was ever reported.
+
+Verification MUST run after expansion, because what it checks — that messages
+and calls open before they continue and close after — only exists once a chunk
+has become the events it stands for.
+
+The order is load-bearing in both directions:
+
+- Middleware MUST see material before enforcement removes it. A shim exists
+  precisely to translate a shape the current protocol does not describe; if
+  enforcement stripped that shape first, the shim would receive an event with
+  nothing left to translate and the run would lose data no one could recover.
+- Application code MUST NOT see material enforcement would remove. Once the
+  translators have had their chance, whatever is still unrecognised is
+  unrecognised, and it stops there.
+
+A consumer MUST apply this ordering on every path that produces events for
+application code, including reconnection and replay. A path that skips
+enforcement is a hole in the guarantee, not an optimisation.
+
+## Outgoing material
+
+The same boundary applies to what a consumer sends. Immediately before
+transmission, a consumer MUST remove unrecognised material from the run input,
+SHOULD warn about what it removed, and MUST treat a malformed known field as
+fatal before anything is sent.
+
+A producer receiving a run input MUST apply the same asymmetry to it:
+unrecognised material does not make the input invalid, a malformed known field
+does.
+
+## What a producer must not do
+
+A producer MUST NOT emit an event type the protocol does not describe in the
+expectation that consumers will ignore it. Unrecognised events survive so the
+protocol can add them, not so a producer can smuggle private signalling through
+the stream; `CUSTOM` and `RAW` exist for that and are described by the schema.

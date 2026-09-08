@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request
+from typing import Any
+
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ag_ui.core.types import RunAgentInput
@@ -6,10 +8,26 @@ from ag_ui.encoder import EventEncoder
 
 from .agent import LangGraphAgent
 
-def add_langgraph_fastapi_endpoint(app: FastAPI, agent: LangGraphAgent, path: str = "/"):
-    """Adds an endpoint to the FastAPI app."""
+def add_langgraph_fastapi_endpoint(
+    app: FastAPI | APIRouter,
+    agent: LangGraphAgent,
+    path: str = "/",
+    **kwargs: Any,
+):
+    """Adds an endpoint to the FastAPI app.
 
-    @app.post(path)
+    Args:
+        app: FastAPI application or APIRouter to register the routes on.
+        agent: LangGraph agent to serve.
+        path: Path of the agent route.
+        **kwargs: Forwarded to ``app.post`` for the agent route (``name``,
+            ``tags``, ``operation_id``, ``dependencies``, ``include_in_schema``,
+            ...). They do not apply to the other routes this helper registers,
+            because values such as ``operation_id`` and ``name`` must stay
+            unique per operation.
+    """
+
+    @app.post(path, **kwargs)
     async def langgraph_agent_endpoint(input_data: RunAgentInput, request: Request):
         # Get the accept header from the request
         accept_header = request.headers.get("accept")

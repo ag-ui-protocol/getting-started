@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from strands import Agent, tool
 from ag_ui_strands import StrandsAgent, create_strands_app, StrandsAgentConfig, ToolBehavior
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 
 class SkillLevel(str, Enum):
@@ -152,5 +153,5 @@ agent = StrandsAgent(
 )
 
 # Create the FastAPI app
-app = create_strands_app(agent)
+app = create_strands_app(agent, origins=cors_origins())
 

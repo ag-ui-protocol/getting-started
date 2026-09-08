@@ -6,6 +6,7 @@ dependencies, so they are tested directly with plain data.
 """
 
 import json
+from collections.abc import AsyncIterable
 
 import pytest
 
@@ -122,6 +123,13 @@ class TestIsStateManagementTool:
 
 
 class TestProcessMessages:
+    @staticmethod
+    async def _only_sdk_message(prompt):
+        assert isinstance(prompt, AsyncIterable)
+        messages = [message async for message in prompt]
+        assert len(messages) == 1
+        return messages[0]
+
     def test_extracts_last_user_message(self, make_input):
         inp = make_input(
             messages=[
@@ -149,6 +157,173 @@ class TestProcessMessages:
         user_msg, pending = process_messages(inp)
         assert user_msg == ""
         assert pending is False
+
+    def test_skips_empty_text_blocks(self, make_input):
+        inp = make_input(
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": ""},
+                        {"type": "text", "text": "   "},
+                    ],
+                }
+            ]
+        )
+        user_msg, pending = process_messages(inp)
+        assert user_msg == ""
+        assert pending is False
+
+    @pytest.mark.asyncio
+    async def test_preserves_ordered_text_image_and_pdf(self, make_input):
+        inp = make_input(
+            thread_id="multimodal-thread",
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "describe these"},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "data",
+                                "value": "aW1hZ2U=",
+                                "mime_type": "image/png",
+                            },
+                        },
+                        {"type": "text", "text": "then read this"},
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "data",
+                                "value": "cGRm",
+                                "mime_type": "application/pdf",
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+
+        prompt, pending = process_messages(inp)
+        message = await self._only_sdk_message(prompt)
+
+        assert pending is False
+        assert message == {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe these"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "aW1hZ2U=",
+                        },
+                    },
+                    {"type": "text", "text": "then read this"},
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": "cGRm",
+                        },
+                    },
+                ],
+            },
+            "parent_tool_use_id": None,
+            "session_id": "multimodal-thread",
+        }
+
+    @pytest.mark.asyncio
+    async def test_maps_supported_remote_image_and_pdf_urls(self, make_input):
+        inp = make_input(
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {"type": "url", "value": "https://example.com/image.png"},
+                        },
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "url",
+                                "value": "https://example.com/file.pdf",
+                                "mime_type": "application/pdf",
+                            },
+                        },
+                    ],
+                }
+            ]
+        )
+
+        prompt, _ = process_messages(inp)
+        message = await self._only_sdk_message(prompt)
+
+        assert message["message"]["content"] == [
+            {
+                "type": "image",
+                "source": {"type": "url", "url": "https://example.com/image.png"},
+            },
+            {
+                "type": "document",
+                "source": {"type": "url", "url": "https://example.com/file.pdf"},
+            },
+        ]
+
+    @pytest.mark.parametrize("content_type", ["audio", "video"])
+    def test_rejects_unsupported_media_instead_of_dropping_it(
+        self, make_input, content_type
+    ):
+        inp = make_input(
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": content_type,
+                            "source": {
+                                "type": "data",
+                                "value": "Ynl0ZXM=",
+                                "mime_type": f"{content_type}/mp4",
+                            },
+                        }
+                    ],
+                }
+            ]
+        )
+
+        with pytest.raises(ValueError, match=f"type {content_type} is not supported"):
+            process_messages(inp)
+
+    def test_rejects_opaque_binary_id_instead_of_dropping_it(self, make_input):
+        inp = make_input(
+            messages=[
+                {
+                    "id": "1",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "binary",
+                            "mime_type": "image/png",
+                            "id": "file-123",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        with pytest.raises(ValueError, match="opaque file id"):
+            process_messages(inp)
 
 
 class TestBuildStateContextAddendum:

@@ -74,6 +74,24 @@ class TestCorsDefaults:
 
         assert resp.headers.get("access-control-allow-origin") is None
 
+    def test_the_non_attributable_origin_never_gets_credentials(self, agent):
+        """`null` matches a sandboxed iframe or a file:// page and names no
+        site, so credentials for it are credentials for anyone."""
+        client = TestClient(create_strands_app(agent, origins=["null"]))
+
+        resp = client.get("/ping", headers={"Origin": "null"})
+
+        assert resp.headers.get("access-control-allow-origin") == "null"
+        assert resp.headers.get("access-control-allow-credentials") is None
+
+    def test_a_named_site_alongside_null_also_loses_credentials(self, agent):
+        client = TestClient(create_strands_app(agent, origins=["https://app.example", "null"]))
+
+        resp = client.get("/ping", headers={"Origin": "https://app.example"})
+
+        assert resp.headers.get("access-control-allow-origin") == "https://app.example"
+        assert resp.headers.get("access-control-allow-credentials") is None
+
     def test_wildcard_remains_available_as_explicit_opt_in(self, agent):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -109,6 +127,9 @@ class TestCorsDefaults:
         resp = client.get("/ping", headers={"Origin": "https://anything.example"})
 
         assert resp.headers.get("access-control-allow-origin") == "*"
+        # The sibling above asserts this for the implicit default; without it
+        # here, granting credentials under an explicit cors_enabled goes unseen.
+        assert resp.headers.get("access-control-allow-credentials") is None
 
     def test_existing_origin_configuration_keeps_wildcard_methods(self, agent):
         client = TestClient(create_strands_app(agent, origins=["https://app.example"]))

@@ -1,5 +1,7 @@
 [project]
 name = "ag_ui_strands"
+description = "Implementation of the AG-UI protocol for AWS Strands Agents."
+readme = "README.md"
 license = "MIT"
 version = "0.3.0"
 license-files = ["LICENSE"]
@@ -9,8 +11,9 @@ authors = [
 requires-python = ">=3.10, <3.15"
 dependencies = [
     "ag-ui-a2ui-toolkit>=0.0.4",
-    "ag-ui-protocol>=0.1.19",
+    "ag-ui-protocol>=0.1.22",
     "fastapi>=0.115.12",
+    "pydantic>=2.11.2",
     "strands-agents>=1.15.0",
 ]
 

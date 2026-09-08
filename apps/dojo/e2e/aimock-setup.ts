@@ -12,6 +12,10 @@ import {
   registerStrandsFixtures,
   strandsAnswersToolResultTurn,
 } from "./strands-fixtures";
+import {
+  deepagentsSubagentsAnswersToolResultTurn,
+  registerDeepagentsSubagentsFixtures,
+} from "./deepagents-subagents-fixtures";
 
 // Configurable so parallel worktrees / runs don't collide on one aimock port.
 const MOCK_PORT = Number(process.env.AIMOCK_PORT) || 5555;
@@ -55,6 +59,7 @@ export async function setupLLMock(): Promise<void> {
   // AWS Strands multi-agent graph: one fixture per node, each scoped to that
   // node's own system prompt. Predicate fixtures, before the generic loader.
   registerMultiAgentStrandsFixtures(mockServer);
+  registerDeepagentsSubagentsFixtures(mockServer);
 
   // AWS Strands interrupt + predictive-state fixtures. Scoped to those demos'
   // own system prompts, before the generic loader.
@@ -1576,6 +1581,12 @@ export async function setupLLMock(): Promise<void> {
         // confirmed or refused, and whether the document edit was re-proposed.
         // Scoped to those demos' own system prompts.
         if (strandsAnswersToolResultTurn(req)) return false;
+        // Don't match the deepagents_subagents demo's own tool-result turns:
+        // the subagent's post-approval answer and the supervisor's relay. A
+        // generic acknowledgment here would make the approve and reject
+        // branches read identically, which is exactly what that spec asserts
+        // differs. Scoped to this demo's system prompts.
+        if (deepagentsSubagentsAnswersToolResultTurn(req)) return false;
         return true;
       },
     },

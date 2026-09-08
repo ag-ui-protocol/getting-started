@@ -642,3 +642,162 @@ describe("MESSAGES_SNAPSHOT with snapshot-supplied activity", () => {
     expect(activity.content?.tasks).toEqual(["local"]);
   });
 });
+
+describe("TEXT_MESSAGE_* against an activity message's id", () => {
+  // Message ids are unique across a conversation, so a text message arriving under an id an
+  // activity message already holds means the producer reused the id. Streaming the text in
+  // would overwrite the activity's structured content with a string, leaving it no longer a
+  // valid ActivityMessage. The text handlers warn and leave the activity message alone,
+  // the same way ACTIVITY_DELTA does when it lands on a non-activity message.
+
+  const activityId = "shared-id";
+  const streamTextInto = (id: string) => (events$: Subject<BaseEvent>) => {
+    events$.next({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: activityId,
+      activityType: "PLAN",
+      content: { tasks: ["plan"] },
+    });
+    events$.next({ type: EventType.TEXT_MESSAGE_START, messageId: id, role: "assistant" });
+    events$.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: id, delta: "Hello" });
+    events$.next({ type: EventType.TEXT_MESSAGE_END, messageId: id });
+  };
+
+  it("leaves the activity message intact instead of streaming text into it", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const updates = await emitAndCollect([], streamTextInto(activityId));
+    warnSpy.mockRestore();
+
+    const messages = updates[updates.length - 1]!.messages!;
+    expect(messages.length).toBe(1);
+    const activity = expectActivityMessage(messages[0]);
+    expect(activity.content).toEqual({ tasks: ["plan"] });
+  });
+
+  it("keeps the activity message's own metadata off the text event's", async () => {
+    // The START handler ends in applyEventMetadata, so a guard that only skipped creating
+    // the message would still merge the text event's metadata into the activity message.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const updates = await emitAndCollect([], (events$) => {
+      events$.next({
+        type: EventType.ACTIVITY_SNAPSHOT,
+        messageId: activityId,
+        activityType: "PLAN",
+        content: { tasks: ["plan"] },
+        metadata: { origin: "activity" },
+      });
+      events$.next({
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: activityId,
+        role: "assistant",
+        metadata: { origin: "text" },
+      });
+    });
+    warnSpy.mockRestore();
+
+    const activity = expectActivityMessage(updates[updates.length - 1]!.messages![0]);
+    expect(activity.metadata).toEqual({ origin: "activity" });
+  });
+
+  it("warns on the id collision from each text handler", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await emitAndCollect([], streamTextInto(activityId));
+    const warnings = warnSpy.mock.calls.map((call) => String(call[0]));
+    warnSpy.mockRestore();
+
+    expect(warnings.some((w) => w.startsWith("TEXT_MESSAGE_START:"))).toBe(true);
+    expect(warnings.some((w) => w.startsWith("TEXT_MESSAGE_CONTENT:"))).toBe(true);
+    expect(warnings.some((w) => w.startsWith("TEXT_MESSAGE_END:"))).toBe(true);
+  });
+
+  it("still streams text normally when the id does not collide", async () => {
+    const updates = await emitAndCollect([], streamTextInto("free-id"));
+
+    const messages = updates[updates.length - 1]!.messages!;
+    expect(messages.map((m) => m.id)).toEqual([activityId, "free-id"]);
+    const text = messages.find((m) => m.id === "free-id")!;
+    expect(text.role).toBe("assistant");
+    expect(text.content).toBe("Hello");
+  });
+});
+
+describe("REASONING_MESSAGE_* against an activity message's id", () => {
+  // The reasoning handlers resolve their target by id with no role check, so a reasoning
+  // event arriving under an id an activity message already holds would append a string onto
+  // the activity's structured content and merge the event's metadata into it. Same collision
+  // as the text handlers above, and the same resolution: warn and leave the activity alone.
+
+  const activityId = "shared-id";
+  const streamReasoningInto = (id: string) => (events$: Subject<BaseEvent>) => {
+    events$.next({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: activityId,
+      activityType: "PLAN",
+      content: { tasks: ["plan"] },
+    });
+    events$.next({ type: EventType.REASONING_MESSAGE_START, messageId: id });
+    events$.next({
+      type: EventType.REASONING_MESSAGE_CONTENT,
+      messageId: id,
+      delta: "thinking",
+    });
+    events$.next({ type: EventType.REASONING_MESSAGE_END, messageId: id });
+  };
+
+  it("leaves the activity message intact instead of streaming reasoning into it", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const updates = await emitAndCollect([], streamReasoningInto(activityId));
+    warnSpy.mockRestore();
+
+    const messages = updates[updates.length - 1]!.messages!;
+    expect(messages.length).toBe(1);
+    const activity = expectActivityMessage(messages[0]);
+    expect(activity.content).toEqual({ tasks: ["plan"] });
+  });
+
+  it("keeps the activity message's own metadata off the reasoning event's", async () => {
+    // REASONING_MESSAGE_START ends in applyEventMetadata, so a guard that only skipped
+    // creating the message would still merge the reasoning event's metadata into the
+    // activity message.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const updates = await emitAndCollect([], (events$) => {
+      events$.next({
+        type: EventType.ACTIVITY_SNAPSHOT,
+        messageId: activityId,
+        activityType: "PLAN",
+        content: { tasks: ["plan"] },
+        metadata: { origin: "activity" },
+      });
+      events$.next({
+        type: EventType.REASONING_MESSAGE_START,
+        messageId: activityId,
+        metadata: { origin: "reasoning" },
+      });
+    });
+    warnSpy.mockRestore();
+
+    const activity = expectActivityMessage(updates[updates.length - 1]!.messages![0]);
+    expect(activity.metadata).toEqual({ origin: "activity" });
+  });
+
+  it("warns on the id collision from each reasoning handler", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await emitAndCollect([], streamReasoningInto(activityId));
+    const warnings = warnSpy.mock.calls.map((call) => String(call[0]));
+    warnSpy.mockRestore();
+
+    expect(warnings.some((w) => w.startsWith("REASONING_MESSAGE_START:"))).toBe(true);
+    expect(warnings.some((w) => w.startsWith("REASONING_MESSAGE_CONTENT:"))).toBe(true);
+    expect(warnings.some((w) => w.startsWith("REASONING_MESSAGE_END:"))).toBe(true);
+  });
+
+  it("still streams reasoning normally when the id does not collide", async () => {
+    const updates = await emitAndCollect([], streamReasoningInto("free-id"));
+
+    const messages = updates[updates.length - 1]!.messages!;
+    expect(messages.map((m) => m.id)).toEqual([activityId, "free-id"]);
+    const reasoning = messages.find((m) => m.id === "free-id")!;
+    expect(reasoning.role).toBe("reasoning");
+    expect(reasoning.content).toBe("thinking");
+  });
+});

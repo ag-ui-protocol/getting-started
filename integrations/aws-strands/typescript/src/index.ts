@@ -2,6 +2,7 @@
 
 export {
   StrandsAgent,
+  INTERRUPT_CANCELLED,
   buildSnapshotMessages,
   buildStrandsSeed,
   convertMessagesForStrandsSeed,
@@ -15,7 +16,26 @@ export {
 } from "./client-proxy-tool";
 export type { StrandsToolRegistry } from "./client-proxy-tool";
 
+export { syncTemplateTools, parkedBatchToolNames } from "./template-tools";
+export type { TemplateToolSelectionEntry } from "./template-tools";
+
+export { CITATIONS_METADATA_KEY } from "./citations";
+export type { AguiCitation, AguiCitationLocation } from "./citations";
+
 export { convertAguiContentToStrands, flattenContentToText } from "./utils";
+
+// The URL fetch policy, so `StrandsAgentConfig.urlFetchPolicy` can actually be
+// written by a consumer: the default to spread over, the type of the field and
+// the type of its scheme allowlist (without which an override cannot be
+// spelled), plus the error class so a caller reading logs or wrapping
+// `fetchUrlContent` can identify a refusal.
+//
+// `UrlFetchUnavailableError` stays off this surface. It is the internal
+// counterpart that separates "could not reach a verdict" from "refused", both
+// of which the adapter turns into a logged `null` before any caller sees
+// either, and the Python package exports no equivalent.
+export { DEFAULT_URL_FETCH_POLICY, UrlFetchPolicyError } from "./utils";
+export type { UrlFetchPolicy, SchemeAllowlist } from "./utils";
 
 export {
   getA2UITools,
@@ -25,6 +45,7 @@ export {
 } from "./a2ui-tool";
 export type {
   A2UIToolParams,
+  A2UIAttemptRecord,
   A2UIToolGlue,
   A2UIInjectConfig,
   A2UIInjectionPlan,
@@ -52,6 +73,8 @@ export type {
   ToolStreamEventHandler,
   PredictStateMapping,
   SessionManagerProvider,
+  TemplateToolsProvider,
+  ThreadAgentConfigProvider,
   StateContextBuilder,
   StateFromArgs,
   StateFromResult,

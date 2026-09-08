@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import express from "express";
 import type { AddressInfo } from "net";
+import { EventType } from "@ag-ui/core";
+import type { AgentStreamEvent } from "@strands-agents/sdk";
 
 import {
   addCapabilities,
@@ -8,6 +10,7 @@ import {
   DEFAULT_CAPABILITIES,
 } from "../endpoint";
 import { StrandsAgent } from "../agent";
+import { collect, scriptedStrandsAgent } from "./helpers";
 
 async function startApp(configure: (app: express.Express) => void): Promise<{
   port: number;
@@ -17,7 +20,7 @@ async function startApp(configure: (app: express.Express) => void): Promise<{
   app.use(express.json({ limit: "1mb" }));
   configure(app);
   const server = await new Promise<import("http").Server>((resolve) => {
-    const s = app.listen(0, () => resolve(s));
+    const s = app.listen(0, "127.0.0.1", () => resolve(s));
   });
   const port = (server.address() as AddressInfo).port;
   return {
@@ -96,7 +99,10 @@ describe("addCapabilities", () => {
 });
 
 describe("capabilitiesFor / addCapabilities { agent }", () => {
-  function makeAgent(emitChunkEvents: boolean): StrandsAgent {
+  function makeAgent(
+    emitChunkEvents: boolean,
+    emitMessagesSnapshot?: boolean,
+  ): StrandsAgent {
     return new StrandsAgent({
       agent: {
         model: {},
@@ -110,7 +116,10 @@ describe("capabilitiesFor / addCapabilities { agent }", () => {
         sessionManager: undefined,
       } as unknown as import("@strands-agents/sdk").Agent,
       name: "cap",
-      config: { emitChunkEvents },
+      config: {
+        emitChunkEvents,
+        ...(emitMessagesSnapshot !== undefined && { emitMessagesSnapshot }),
+      },
     });
   }
 
@@ -134,6 +143,21 @@ describe("capabilitiesFor / addCapabilities { agent }", () => {
     expect(caps.events.TEXT_MESSAGE_END).toBe(true);
   });
 
+  it("advertises citations in every configuration", () => {
+    // Chunk mode drops TEXT_MESSAGE_END but re-emits its metadata as a final
+    // metadata-only chunk, so the closing citation survives with or without
+    // message snapshots. Nothing here may report a capability the runtime does
+    // not deliver; `citations.test.ts` pins the delivery.
+    expect(capabilitiesFor(makeAgent(false)).features.citations).toBe(true);
+    expect(capabilitiesFor(makeAgent(true)).features.citations).toBe(true);
+    expect(capabilitiesFor(makeAgent(false, false)).features.citations).toBe(
+      true,
+    );
+    expect(capabilitiesFor(makeAgent(true, false)).features.citations).toBe(
+      true,
+    );
+  });
+
   it("addCapabilities({ agent }) serves the derived matrix", async () => {
     const agent = makeAgent(true);
     const { port, close } = await startApp((app) =>
@@ -147,5 +171,63 @@ describe("capabilitiesFor / addCapabilities { agent }", () => {
     } finally {
       await close();
     }
+  });
+});
+
+describe("the advertised matrix against what a run publishes", () => {
+  // An unmapped provider event: real, carries a payload no mapped AG-UI event
+  // conveys, and the adapter has no branch for it. Same guardrail redaction
+  // `raw-fallback.test.ts` uses to pin the fallback itself.
+  const UNMAPPED_EVENT = {
+    type: "modelRedactionEvent",
+    outputRedaction: { text: "[redacted]" },
+  } as unknown as AgentStreamEvent;
+
+  async function runEmitsRaw(): Promise<boolean> {
+    const events = await collect(scriptedStrandsAgent([UNMAPPED_EVENT]));
+    return events.some((e) => e.type === EventType.RAW);
+  }
+
+  it("advertises RAW exactly when a run publishes one", async () => {
+    // Read off a real run rather than hardcoded, so the flag cannot drift away
+    // from the adapter again: the terminal fallback in `agent.ts` forwards
+    // every unmapped Strands event as RAW, unconditionally.
+    const emitsRaw = await runEmitsRaw();
+    expect(
+      emitsRaw,
+      "no RAW event on the wire to compare the flag against",
+    ).toBe(true);
+
+    const { port, close } = await startApp((app) =>
+      addCapabilities(app, "/capabilities"),
+    );
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/capabilities`);
+      const body = await res.json();
+      expect(body.events.RAW).toBe(emitsRaw);
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps RAW advertised in chunk mode", async () => {
+    // The fallback is not gated on `emitChunkEvents`, so neither is the flag.
+    const emitsRaw = await runEmitsRaw();
+    const agent = new StrandsAgent({
+      agent: {
+        model: {},
+        tools: [],
+        toolRegistry: {
+          list: () => [],
+          add() {},
+          get: () => undefined,
+          remove() {},
+        },
+        sessionManager: undefined,
+      } as unknown as import("@strands-agents/sdk").Agent,
+      name: "cap",
+      config: { emitChunkEvents: true },
+    });
+    expect(capabilitiesFor(agent).events.RAW).toBe(emitsRaw);
   });
 });

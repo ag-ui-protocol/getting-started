@@ -174,8 +174,12 @@ describe("Generic native interrupts (not raised by the adapter's own hook)", () 
     ).not.toBe("interrupt");
     // And the tool body past the interrupt actually ran, with the payload the
     // client sent. Without this the round trip passes on a dropped payload.
+    // A generic answer reaches the tool wrapped, the same as on the Python
+    // bridge, so the tool reads it off `.response`.
     expect(resumedBodies).toEqual(["ask_operator"]);
-    expect(resumedResponses).toEqual([{ environment: "staging" }]);
+    expect(resumedResponses).toEqual([
+      { response: { environment: "staging" } },
+    ]);
   });
 
   it("still classifies an ag_ui:tool_call:-named interrupt as a tool-call approval", async () => {

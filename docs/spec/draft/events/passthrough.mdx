@@ -1,0 +1,82 @@
+---
+title: "Raw and Custom Events"
+description: "The two escape hatches, and the limits that keep them from becoming a second protocol — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Two event types carry what the protocol does not model: `RAW`, a
+provider-native event passed through untranslated, and `CUSTOM`, an
+application's own event. Both are standalone — they open and close no items of
+their own and MAY appear anywhere within an open run, though `CUSTOM`, unlike
+`RAW`, does end an open [chunk stream](/spec/draft/basic/patterns/streaming#closing-a-chunk-stream)
+in its lane. Their limits are the
+point: everything on this page exists so the escape hatches cannot quietly
+become a second protocol.
+
+## `RAW`
+
+Passes a provider-native event through untranslated, for consumers that need
+detail the protocol does not model.
+
+```json
+{
+  "type": "RAW",
+  "event": { "…the provider's own event…": true },
+  "source": "openai"
+}
+```
+
+- `event` is REQUIRED and is any JSON value; `source` is OPTIONAL and names the
+  provider or framework it came from.
+- A consumer MUST NOT derive protocol behaviour from a `RAW` event: nothing in
+  it opens, closes, or amends anything this specification tracks.
+- A producer SHOULD emit `RAW` alongside the standard events, never instead of
+  them. A producer that expresses something *only* as `RAW` has not put it in
+  the protocol.
+
+The same payload also travels as the `rawEvent` field on ordinary events —
+that spelling attaches provenance to one translated event, where `RAW` carries
+material no translated event exists for.
+
+## `CUSTOM`
+
+The protocol's extension point for an application's own events.
+
+```json
+{
+  "type": "CUSTOM",
+  "name": "com.example.cart-updated",
+  "value": { "items": 3 }
+}
+```
+
+- `name` and `value` are REQUIRED — without a name a consumer cannot route the
+  value, and an event with no payload says nothing.
+- A consumer that does not recognise a `name` MUST ignore the event. This is
+  protocol-legal traffic, not
+  [unrecognised material](/spec/draft/basic/processing): nothing is stripped
+  and nothing warns.
+- Names are application space. Producers SHOULD prefix names they invent with
+  a vendor or application identifier, so two parties extending the same stream
+  do not collide; names without a prefix are reserved for the protocol's own
+  future use.
+- Anything a consumer does with a recognised `CUSTOM` event is outside the
+  protocol. A producer MUST NOT rely on a `CUSTOM` event to carry semantics
+  this specification assigns to a standard event — a custom "message" that a
+  conforming consumer legally ignores is not a message.
+
+## Data Types
+
+[`RawEvent`](/spec/draft/schema#rawevent) and [`CustomEvent`](/spec/draft/schema#customevent) are defined by the
+[schema reference](/spec/draft/schema).
+
+## Security Considerations
+
+Passthrough content is unvalidated by definition: no schema constrains
+`event` or `value`, and `RAW` payloads originate wherever the provider got
+them. A consumer MUST treat both as untrusted input — never rendered as
+markup, executed, or granted authority — and SHOULD treat a `RAW` payload with
+the same suspicion as the network traffic it summarises.

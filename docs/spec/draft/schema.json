@@ -1,0 +1,1655 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ag-ui.com/spec/draft/schema.json",
+  "title": "AG-UI Protocol",
+  "description": "The machine-readable contract for the AG-UI protocol. Validating a document against this file validates it as an AG-UI event; every other definition is addressable by its own anchor, so this file's own address followed by #RunAgentInput names the request body. Addresses are written relative to $id rather than spelled out, so a frozen copy of this file describes itself rather than the draft it came from. Field names are camelCase because this describes the wire format rather than any language's idiom. Objects are exact: this file defines what exists in this version of the protocol, so a property it does not declare fails validation. Compatibility with newer minor versions is a behavioural rule for receivers, who tolerate what they do not recognise rather than rejecting it; a validator has no way to express tolerance, so that rule lives in the prose specification. How events may be ordered and whether a patch applies to the state it targets are behavioural rules for the same reason. Exactness has three kinds of exception: the compositional fragments — BaseEvent, Attributable, BaseMessage — which are open in themselves because the definitions composing them close the whole shape; objects that are open by meaning, because arbitrary keys are their data rather than unrecognised fields — metadata, activity content, a carried JSON Schema — and the JSON Patch operations, which stay open because RFC 6902 requires members an operation does not define to be ignored rather than rejected.",
+  "$ref": "#/$defs/Event",
+  "$defs": {
+    "Event": {
+      "$anchor": "Event",
+      "description": "Any AG-UI event. Every member is normative: there is no optional tier and no event a consumer may decline to implement. Discriminated by the type property.",
+      "oneOf": [
+        { "$ref": "#/$defs/TextMessageStartEvent" },
+        { "$ref": "#/$defs/TextMessageContentEvent" },
+        { "$ref": "#/$defs/TextMessageEndEvent" },
+        { "$ref": "#/$defs/TextMessageChunkEvent" },
+        { "$ref": "#/$defs/ToolCallStartEvent" },
+        { "$ref": "#/$defs/ToolCallArgsEvent" },
+        { "$ref": "#/$defs/ToolCallEndEvent" },
+        { "$ref": "#/$defs/ToolCallChunkEvent" },
+        { "$ref": "#/$defs/ToolCallResultEvent" },
+        { "$ref": "#/$defs/StateSnapshotEvent" },
+        { "$ref": "#/$defs/StateDeltaEvent" },
+        { "$ref": "#/$defs/MessagesSnapshotEvent" },
+        { "$ref": "#/$defs/ActivitySnapshotEvent" },
+        { "$ref": "#/$defs/ActivityDeltaEvent" },
+        { "$ref": "#/$defs/RawEvent" },
+        { "$ref": "#/$defs/CustomEvent" },
+        { "$ref": "#/$defs/RunStartedEvent" },
+        { "$ref": "#/$defs/RunFinishedEvent" },
+        { "$ref": "#/$defs/RunErrorEvent" },
+        { "$ref": "#/$defs/StepStartedEvent" },
+        { "$ref": "#/$defs/StepFinishedEvent" },
+        { "$ref": "#/$defs/ReasoningStartEvent" },
+        { "$ref": "#/$defs/ReasoningMessageStartEvent" },
+        { "$ref": "#/$defs/ReasoningMessageContentEvent" },
+        { "$ref": "#/$defs/ReasoningMessageEndEvent" },
+        { "$ref": "#/$defs/ReasoningMessageChunkEvent" },
+        { "$ref": "#/$defs/ReasoningEndEvent" },
+        { "$ref": "#/$defs/ReasoningEncryptedValueEvent" },
+        { "$ref": "#/$defs/SubagentStartedEvent" },
+        { "$ref": "#/$defs/SubagentFinishedEvent" },
+        { "$ref": "#/$defs/SubagentErrorEvent" }
+      ]
+    },
+    "EventType": {
+      "$anchor": "EventType",
+      "type": "string",
+      "description": "The discriminator carried by every event.",
+      "enum": [
+        "TEXT_MESSAGE_START",
+        "TEXT_MESSAGE_CONTENT",
+        "TEXT_MESSAGE_END",
+        "TEXT_MESSAGE_CHUNK",
+        "TOOL_CALL_START",
+        "TOOL_CALL_ARGS",
+        "TOOL_CALL_END",
+        "TOOL_CALL_CHUNK",
+        "TOOL_CALL_RESULT",
+        "STATE_SNAPSHOT",
+        "STATE_DELTA",
+        "MESSAGES_SNAPSHOT",
+        "ACTIVITY_SNAPSHOT",
+        "ACTIVITY_DELTA",
+        "RAW",
+        "CUSTOM",
+        "RUN_STARTED",
+        "RUN_FINISHED",
+        "RUN_ERROR",
+        "STEP_STARTED",
+        "STEP_FINISHED",
+        "REASONING_START",
+        "REASONING_MESSAGE_START",
+        "REASONING_MESSAGE_CONTENT",
+        "REASONING_MESSAGE_END",
+        "REASONING_MESSAGE_CHUNK",
+        "REASONING_END",
+        "REASONING_ENCRYPTED_VALUE",
+        "SUBAGENT_STARTED",
+        "SUBAGENT_FINISHED",
+        "SUBAGENT_ERROR"
+      ]
+    },
+    "BaseEvent": {
+      "$anchor": "BaseEvent",
+      "type": "object",
+      "description": "The fields every event carries, whatever its type. Composed into each event definition rather than repeated, so a change here reaches every event at once.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/EventType",
+          "description": "Which event this is. Each event definition narrows this to a single value."
+        },
+        "timestamp": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "When the event was created. Bounded to the range JSON numbers survive a round trip in, so the value a consumer reads is the value the producer wrote. Deliberately not a float. The unit is not constrained here, because it never has been stated normatively; every SDK that sets it in practice uses milliseconds since the Unix epoch, and a producer choosing another unit will be misread by consumers even though it validates. Nothing in the protocol computes with this value."
+        },
+        "rawEvent": {
+          "description": "The provider-native event this one was translated from, carried verbatim for debugging and for consumers that need detail the protocol does not model. Any JSON value."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this event."
+        }
+      },
+      "required": ["type"]
+    },
+    "Attributable": {
+      "$anchor": "Attributable",
+      "type": "object",
+      "description": "Composed into everything that can belong to a subagent's work: the events that describe content or progress, the message types, and each interrupt. Run-scoped events omit it — RUN_STARTED, RUN_FINISHED and RUN_ERROR describe the run itself and MESSAGES_SNAPSHOT is conversation-wide, so none of them can belong to one subagent. A tool call omits it too and inherits its containing message's attribution.",
+      "properties": {
+        "subagentRunId": {
+          "$ref": "#/$defs/SubagentRunId",
+          "description": "The subagent invocation this belongs to. Absent means the parent agent produced it directly."
+        }
+      }
+    },
+    "SubagentRunId": {
+      "$anchor": "SubagentRunId",
+      "type": "string",
+      "description": "An opaque handle for one subagent invocation, not a reusable name for a subagent definition: two invocations of the same subagent carry two different values. Named to mirror runId one level down, the way the subagent's name mirrors agentId."
+    },
+    "Metadata": {
+      "$anchor": "Metadata",
+      "type": "object",
+      "description": "Extra information attached to an event, a message, a tool call, a tool, an interrupt or a resume entry. Open by key: any JSON value is allowed under a key, including null, because a null there is meaningful data. The object itself may be absent but is never null when present. The key ag-ui is reserved for the protocol's own use; reservation is by convention, since validating the shape of a key's value would contradict being open by key.",
+      "additionalProperties": true
+    },
+    "State": {
+      "$anchor": "State",
+      "description": "Agent state. Any JSON value: the protocol carries state without interpreting it, so an object, an array, a string and a number are all valid."
+    },
+    "TextMessageRole": {
+      "$anchor": "TextMessageRole",
+      "type": "string",
+      "description": "The roles a streamed text message may take. Excludes tool, which is carried by TOOL_CALL_RESULT rather than streamed as text.",
+      "enum": ["developer", "system", "assistant", "user"]
+    },
+    "Role": {
+      "$anchor": "Role",
+      "type": "string",
+      "description": "Every role a materialised message may have.",
+      "enum": [
+        "developer",
+        "system",
+        "assistant",
+        "user",
+        "tool",
+        "activity",
+        "reasoning"
+      ]
+    },
+    "TextMessageStartEvent": {
+      "$anchor": "TextMessageStartEvent",
+      "type": "object",
+      "description": "Opens a streamed text message. The content arrives as TEXT_MESSAGE_CONTENT events and the message closes with TEXT_MESSAGE_END.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TEXT_MESSAGE_START" },
+        "messageId": {
+          "type": "string",
+          "description": "Identifies the message this stream builds, and ties the later content and end events to it."
+        },
+        "role": {
+          "$ref": "#/$defs/TextMessageRole",
+          "default": "assistant",
+          "description": "Who the message is from. An absent role means assistant; that meaning is normative and stated in the prose, because a validator treats a default as documentation rather than as behaviour."
+        },
+        "name": {
+          "type": "string",
+          "description": "An optional display name for the author, for providers that distinguish several participants in one role."
+        }
+      },
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
+    },
+    "TextMessageContentEvent": {
+      "$anchor": "TextMessageContentEvent",
+      "type": "object",
+      "description": "Appends a fragment to a streamed text message.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TEXT_MESSAGE_CONTENT" },
+        "messageId": {
+          "type": "string",
+          "description": "The message this fragment belongs to."
+        },
+        "delta": {
+          "type": "string",
+          "description": "The fragment to append. May be the empty string: providers emit empty deltas as keep-alives and while a tool call is being decided, and rejecting them would kill runs that are working correctly."
+        }
+      },
+      "required": ["type", "messageId", "delta"],
+      "unevaluatedProperties": false
+    },
+    "TextMessageEndEvent": {
+      "$anchor": "TextMessageEndEvent",
+      "type": "object",
+      "description": "Closes a streamed text message.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TEXT_MESSAGE_END" },
+        "messageId": {
+          "type": "string",
+          "description": "The message being closed."
+        }
+      },
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
+    },
+    "TextMessageChunkEvent": {
+      "$anchor": "TextMessageChunkEvent",
+      "type": "object",
+      "description": "A shorthand that stands in for a start, content and end sequence, for producers that cannot know in advance where a message begins. Every field is optional because a continuation chunk omits what has not changed; which message a field-less chunk continues is a sequence question the prose specification answers.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TEXT_MESSAGE_CHUNK" },
+        "messageId": {
+          "type": "string",
+          "description": "The message this chunk belongs to. Absent continues the message already open."
+        },
+        "role": {
+          "$ref": "#/$defs/TextMessageRole",
+          "description": "Who the message is from, on the chunk that opens it."
+        },
+        "delta": {
+          "type": "string",
+          "description": "The fragment to append. May be the empty string."
+        },
+        "name": {
+          "type": "string",
+          "description": "An optional display name for the author."
+        }
+      },
+      "required": ["type"],
+      "unevaluatedProperties": false
+    },
+    "ToolCallStartEvent": {
+      "$anchor": "ToolCallStartEvent",
+      "type": "object",
+      "description": "Opens a tool call. The arguments arrive as TOOL_CALL_ARGS events and the call closes with TOOL_CALL_END.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TOOL_CALL_START" },
+        "toolCallId": {
+          "type": "string",
+          "description": "Identifies the call, and ties the later args, end and result events to it."
+        },
+        "toolCallName": {
+          "type": "string",
+          "description": "Which tool is being called."
+        },
+        "parentMessageId": {
+          "type": "string",
+          "description": "The assistant message that holds this call. Absent means the producer did not attribute it to one."
+        }
+      },
+      "required": ["type", "toolCallId", "toolCallName"],
+      "unevaluatedProperties": false
+    },
+    "ToolCallArgsEvent": {
+      "$anchor": "ToolCallArgsEvent",
+      "type": "object",
+      "description": "Appends a fragment of a tool call's arguments.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TOOL_CALL_ARGS" },
+        "toolCallId": {
+          "type": "string",
+          "description": "The call these arguments belong to."
+        },
+        "delta": {
+          "type": "string",
+          "description": "A fragment of the arguments, which concatenate into the call's argument text — conventionally a JSON document, though the protocol does not validate it (see FunctionCall.arguments). Deliberately a string rather than parsed JSON: a fragment is not itself a document. May be the empty string."
+        }
+      },
+      "required": ["type", "toolCallId", "delta"],
+      "unevaluatedProperties": false
+    },
+    "ToolCallEndEvent": {
+      "$anchor": "ToolCallEndEvent",
+      "type": "object",
+      "description": "Closes a tool call, meaning its arguments are complete.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TOOL_CALL_END" },
+        "toolCallId": {
+          "type": "string",
+          "description": "The call being closed."
+        }
+      },
+      "required": ["type", "toolCallId"],
+      "unevaluatedProperties": false
+    },
+    "ToolCallChunkEvent": {
+      "$anchor": "ToolCallChunkEvent",
+      "type": "object",
+      "description": "A shorthand that stands in for a tool call's start, args and end sequence. Every field is optional for the same reason as TEXT_MESSAGE_CHUNK.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TOOL_CALL_CHUNK" },
+        "toolCallId": {
+          "type": "string",
+          "description": "The call this chunk belongs to. Absent continues the call already open."
+        },
+        "toolCallName": {
+          "type": "string",
+          "description": "Which tool is being called, on the chunk that opens it."
+        },
+        "parentMessageId": {
+          "type": "string",
+          "description": "The assistant message that holds this call."
+        },
+        "delta": {
+          "type": "string",
+          "description": "A fragment of the arguments. May be the empty string."
+        }
+      },
+      "required": ["type"],
+      "unevaluatedProperties": false
+    },
+    "ToolCallResultEvent": {
+      "$anchor": "ToolCallResultEvent",
+      "type": "object",
+      "description": "Carries what a tool returned. Mints a tool message rather than appending to an existing one, which is why it has its own messageId.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "TOOL_CALL_RESULT" },
+        "messageId": {
+          "type": "string",
+          "description": "The tool message this result becomes."
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "The call being answered."
+        },
+        "content": {
+          "type": "string",
+          "description": "What the tool returned, as a string. A tool returning structured data serialises it."
+        },
+        "role": {
+          "const": "tool",
+          "description": "Present only for symmetry with the message it mints; the value is fixed, so a producer may leave it out."
+        }
+      },
+      "required": ["type", "messageId", "toolCallId", "content"],
+      "unevaluatedProperties": false
+    },
+    "StateSnapshotEvent": {
+      "$anchor": "StateSnapshotEvent",
+      "type": "object",
+      "description": "Replaces the agent state wholesale. Sent when a delta cannot express the change, or to resynchronise a consumer.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "STATE_SNAPSHOT" },
+        "snapshot": {
+          "$ref": "#/$defs/State",
+          "description": "The complete new state."
+        }
+      },
+      "required": ["type", "snapshot"],
+      "unevaluatedProperties": false
+    },
+    "StateDeltaEvent": {
+      "$anchor": "StateDeltaEvent",
+      "type": "object",
+      "description": "Changes the agent state incrementally.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "STATE_DELTA" },
+        "delta": {
+          "$ref": "#/$defs/JsonPatch",
+          "description": "The change, as an RFC 6902 patch against the current state. Structural validity here does not mean the patch applies: a well-formed operation may point at a path that does not exist, which RFC 6902 leaves to the applier."
+        }
+      },
+      "required": ["type", "delta"],
+      "unevaluatedProperties": false
+    },
+    "MessagesSnapshotEvent": {
+      "$anchor": "MessagesSnapshotEvent",
+      "type": "object",
+      "description": "The complete set of messages the producer owns, in order. Conversation-wide rather than a plain overwrite: a consumer may keep messages of its own that no producer tracks, so exactly how a snapshot reconciles with those is behavioural and belongs in the prose. Being conversation-wide it cannot belong to a single subagent, so it carries no attribution; it does establish which subagent owns each message it contains, through the messages themselves.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "MESSAGES_SNAPSHOT" },
+        "messages": {
+          "type": "array",
+          "description": "The messages the producer is declaring, in order.",
+          "items": { "$ref": "#/$defs/Message" }
+        }
+      },
+      "required": ["type", "messages"],
+      "unevaluatedProperties": false
+    },
+    "ActivitySnapshotEvent": {
+      "$anchor": "ActivitySnapshotEvent",
+      "type": "object",
+      "description": "Reports structured progress that is not conversation content, such as a step a UI renders as its own widget.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "ACTIVITY_SNAPSHOT" },
+        "messageId": {
+          "type": "string",
+          "description": "The activity message this describes."
+        },
+        "activityType": {
+          "type": "string",
+          "description": "What kind of activity this is. An open string: the set is the producer's, not the protocol's."
+        },
+        "content": {
+          "type": "object",
+          "description": "The activity's payload, open by key.",
+          "additionalProperties": true
+        },
+        "replace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this snapshot overwrites the activity's existing content. Absent means it does, and that meaning is normative; only an explicit false asks a consumer to leave what is already there. It does not ask for a merge — ACTIVITY_DELTA is how content is changed incrementally. What a consumer does with a non-overwriting snapshot is behavioural and belongs in the prose."
+        }
+      },
+      "required": ["type", "messageId", "activityType", "content"],
+      "unevaluatedProperties": false
+    },
+    "ActivityDeltaEvent": {
+      "$anchor": "ActivityDeltaEvent",
+      "type": "object",
+      "description": "Changes an activity message's content incrementally.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "ACTIVITY_DELTA" },
+        "messageId": {
+          "type": "string",
+          "description": "The activity message being changed."
+        },
+        "activityType": {
+          "type": "string",
+          "description": "What kind of activity this is."
+        },
+        "patch": {
+          "$ref": "#/$defs/JsonPatch",
+          "description": "The change, as an RFC 6902 patch against the activity's content."
+        }
+      },
+      "required": ["type", "messageId", "activityType", "patch"],
+      "unevaluatedProperties": false
+    },
+    "RawEvent": {
+      "$anchor": "RawEvent",
+      "type": "object",
+      "description": "Passes a provider-native event through untranslated, for consumers that need detail the protocol does not model.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "RAW" },
+        "event": {
+          "description": "The provider's own event. Any JSON value, and required: an event whose only purpose is to carry this would say nothing without it."
+        },
+        "source": {
+          "type": "string",
+          "description": "Which provider or framework the event came from."
+        }
+      },
+      "required": ["type", "event"],
+      "unevaluatedProperties": false
+    },
+    "CustomEvent": {
+      "$anchor": "CustomEvent",
+      "type": "object",
+      "description": "The protocol's extension point for an application's own events. Anything a consumer does with one is outside the protocol.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "CUSTOM" },
+        "name": {
+          "type": "string",
+          "description": "What this custom event is. Required: without it a consumer cannot route the value."
+        },
+        "value": { "description": "The payload. Any JSON value, and required." }
+      },
+      "required": ["type", "name", "value"],
+      "unevaluatedProperties": false
+    },
+    "RunStartedEvent": {
+      "$anchor": "RunStartedEvent",
+      "type": "object",
+      "description": "Opens a run. Run-scoped, so it carries no subagent attribution.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "RUN_STARTED" },
+        "threadId": {
+          "type": "string",
+          "description": "The conversation this run belongs to."
+        },
+        "runId": { "type": "string", "description": "Identifies this run." },
+        "protocolVersion": {
+          "type": "string",
+          "description": "The protocol version this producer speaks, such as \"1.0\" — the producer's own version, not an echo of the input's, which is what makes the pair a negotiation: each side declares itself and the consumer sees a downgrade the moment it happens. Absent means a producer from before the protocol carried a version."
+        },
+        "parentRunId": {
+          "type": "string",
+          "description": "The run that spawned this one, when an agent invokes another agent as a separate run rather than as a subagent within one."
+        },
+        "input": {
+          "$ref": "#/$defs/RunAgentInput",
+          "description": "The request this run was started from, echoed back so a consumer that did not make the request can still see what the agent was asked."
+        }
+      },
+      "required": ["type", "threadId", "runId"],
+      "unevaluatedProperties": false
+    },
+    "RunFinishedEvent": {
+      "$anchor": "RunFinishedEvent",
+      "type": "object",
+      "description": "Closes a run that did not fail. Run-scoped, so it carries no subagent attribution.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "RUN_FINISHED" },
+        "threadId": {
+          "type": "string",
+          "description": "The conversation this run belongs to."
+        },
+        "runId": { "type": "string", "description": "The run being closed." },
+        "result": {
+          "description": "The run's return value, if it has one. Any JSON value."
+        },
+        "outcome": {
+          "$ref": "#/$defs/RunFinishedOutcome",
+          "description": "Why the run ended. Absent means success, so every producer written before outcomes existed is already conformant."
+        },
+        "usage": {
+          "type": "array",
+          "description": "Token usage for the run, one entry per provider and model, so a run that invoked several models keeps them separate. A consumer that only wants totals sums across the entries.",
+          "items": { "$ref": "#/$defs/TokenUsage" }
+        }
+      },
+      "required": ["type", "threadId", "runId"],
+      "unevaluatedProperties": false
+    },
+    "RunErrorEvent": {
+      "$anchor": "RunErrorEvent",
+      "type": "object",
+      "description": "Ends a run that failed. Run-scoped, so it carries no subagent attribution; a subagent that fails without ending the run reports SUBAGENT_ERROR instead.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "RUN_ERROR" },
+        "message": {
+          "type": "string",
+          "description": "What went wrong, for a person to read."
+        },
+        "code": {
+          "type": "string",
+          "description": "A machine-readable error code. An open string: the protocol defines no vocabulary."
+        },
+        "usage": {
+          "type": "array",
+          "description": "Token usage accrued before the failure, for a run that completed one or more model calls before dying.",
+          "items": { "$ref": "#/$defs/TokenUsage" }
+        }
+      },
+      "required": ["type", "message"],
+      "unevaluatedProperties": false
+    },
+    "StepStartedEvent": {
+      "$anchor": "StepStartedEvent",
+      "type": "object",
+      "description": "Opens a named step within a run, for producers whose frameworks have a step concept worth surfacing.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "STEP_STARTED" },
+        "stepName": {
+          "type": "string",
+          "description": "The step's name. Identifies it: the matching STEP_FINISHED carries the same name."
+        }
+      },
+      "required": ["type", "stepName"],
+      "unevaluatedProperties": false
+    },
+    "StepFinishedEvent": {
+      "$anchor": "StepFinishedEvent",
+      "type": "object",
+      "description": "Closes a named step.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "STEP_FINISHED" },
+        "stepName": {
+          "type": "string",
+          "description": "The step being closed."
+        }
+      },
+      "required": ["type", "stepName"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningStartEvent": {
+      "$anchor": "ReasoningStartEvent",
+      "type": "object",
+      "description": "Opens a span of reasoning. A span may contain several reasoning messages.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_START" },
+        "messageId": {
+          "type": "string",
+          "description": "The span being opened."
+        }
+      },
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningMessageStartEvent": {
+      "$anchor": "ReasoningMessageStartEvent",
+      "type": "object",
+      "description": "Opens a streamed reasoning message.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_MESSAGE_START" },
+        "messageId": {
+          "type": "string",
+          "description": "The reasoning message this stream builds."
+        },
+        "role": {
+          "const": "reasoning",
+          "description": "Fixed, and required rather than defaulted. The requirement is inherited from the SDKs rather than chosen."
+        }
+      },
+      "required": ["type", "messageId", "role"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningMessageContentEvent": {
+      "$anchor": "ReasoningMessageContentEvent",
+      "type": "object",
+      "description": "Appends a fragment to a streamed reasoning message.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_MESSAGE_CONTENT" },
+        "messageId": {
+          "type": "string",
+          "description": "The reasoning message this fragment belongs to."
+        },
+        "delta": {
+          "type": "string",
+          "description": "The fragment to append. May be the empty string."
+        }
+      },
+      "required": ["type", "messageId", "delta"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningMessageEndEvent": {
+      "$anchor": "ReasoningMessageEndEvent",
+      "type": "object",
+      "description": "Closes a streamed reasoning message.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_MESSAGE_END" },
+        "messageId": {
+          "type": "string",
+          "description": "The reasoning message being closed."
+        }
+      },
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningMessageChunkEvent": {
+      "$anchor": "ReasoningMessageChunkEvent",
+      "type": "object",
+      "description": "A shorthand that stands in for a reasoning message's start, content and end sequence.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_MESSAGE_CHUNK" },
+        "messageId": {
+          "type": "string",
+          "description": "The reasoning message this chunk belongs to. Absent continues the one already open."
+        },
+        "delta": {
+          "type": "string",
+          "description": "The fragment to append. May be the empty string."
+        }
+      },
+      "required": ["type"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningEndEvent": {
+      "$anchor": "ReasoningEndEvent",
+      "type": "object",
+      "description": "Closes a span of reasoning.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_END" },
+        "messageId": {
+          "type": "string",
+          "description": "The span being closed."
+        }
+      },
+      "required": ["type", "messageId"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningEncryptedValueEvent": {
+      "$anchor": "ReasoningEncryptedValueEvent",
+      "type": "object",
+      "description": "Carries a provider's opaque, encrypted reasoning artefact, which a consumer stores and returns on a later turn without being able to read it.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseEvent" },
+        { "$ref": "#/$defs/Attributable" }
+      ],
+      "properties": {
+        "type": { "const": "REASONING_ENCRYPTED_VALUE" },
+        "subtype": {
+          "$ref": "#/$defs/ReasoningEncryptedValueSubtype",
+          "description": "What kind of thing entityId names, which decides where the value is stored."
+        },
+        "entityId": {
+          "type": "string",
+          "description": "What the value belongs to: a message id or a tool call id, according to subtype."
+        },
+        "encryptedValue": {
+          "type": "string",
+          "description": "The provider's opaque artefact."
+        }
+      },
+      "required": ["type", "subtype", "entityId", "encryptedValue"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningEncryptedValueSubtype": {
+      "$anchor": "ReasoningEncryptedValueSubtype",
+      "type": "string",
+      "description": "Whether a REASONING_ENCRYPTED_VALUE belongs to a message or to a tool call.",
+      "enum": ["tool-call", "message"]
+    },
+    "SubagentStartedEvent": {
+      "$anchor": "SubagentStartedEvent",
+      "type": "object",
+      "description": "Announces that a subagent invocation has begun. Everything the subagent produces afterwards is attributed by carrying its subagentRunId, so a consumer can group the work without replaying the stream. Composed from BaseEvent alone rather than Attributable, because here subagentRunId identifies the subagent rather than attributing the event to one; attribution to an enclosing subagent is parentSubagentRunId.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "SUBAGENT_STARTED" },
+        "subagentRunId": {
+          "$ref": "#/$defs/SubagentRunId",
+          "description": "The invocation being announced."
+        },
+        "name": {
+          "type": "string",
+          "description": "The subagent's name, which is reusable across invocations, unlike subagentRunId."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this subagent is for, for a consumer to display."
+        },
+        "parentSubagentRunId": {
+          "$ref": "#/$defs/SubagentRunId",
+          "description": "The subagent invocation that spawned this one, for nested delegation. Absent means the parent agent spawned it directly."
+        },
+        "parentToolCallId": {
+          "type": "string",
+          "description": "The tool call that spawned this subagent, for the pattern where agents are exposed to a model as tools. Lets a consumer tie the subagent to the call without reading rawEvent."
+        },
+        "parentMessageId": {
+          "type": "string",
+          "description": "The message that held the spawning tool call."
+        }
+      },
+      "required": ["type", "subagentRunId", "name"],
+      "unevaluatedProperties": false
+    },
+    "SubagentFinishedEvent": {
+      "$anchor": "SubagentFinishedEvent",
+      "type": "object",
+      "description": "Ends a subagent invocation's segment of this run, either because the work completed or because it is suspended awaiting outside input.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "SUBAGENT_FINISHED" },
+        "subagentRunId": {
+          "$ref": "#/$defs/SubagentRunId",
+          "description": "The invocation being closed."
+        },
+        "result": {
+          "description": "The subagent's return value, if it has one. Any JSON value, mirroring RUN_FINISHED.result."
+        },
+        "outcome": {
+          "$ref": "#/$defs/SubagentFinishedOutcome",
+          "description": "Why the segment ended. Absent means success. A suspended subagent is neither a success nor a failure, which is why saying so needs its own value rather than being inferred from a later interrupt."
+        }
+      },
+      "required": ["type", "subagentRunId"],
+      "unevaluatedProperties": false
+    },
+    "SubagentErrorEvent": {
+      "$anchor": "SubagentErrorEvent",
+      "type": "object",
+      "description": "Reports that a subagent invocation failed. The run may continue: a parent agent is free to handle a failed subagent, which is why this is not RUN_ERROR.",
+      "allOf": [{ "$ref": "#/$defs/BaseEvent" }],
+      "properties": {
+        "type": { "const": "SUBAGENT_ERROR" },
+        "subagentRunId": {
+          "$ref": "#/$defs/SubagentRunId",
+          "description": "The invocation that failed."
+        },
+        "message": {
+          "type": "string",
+          "description": "What went wrong, for a person to read."
+        },
+        "code": {
+          "type": "string",
+          "description": "A machine-readable error code. An open string."
+        }
+      },
+      "required": ["type", "subagentRunId", "message"],
+      "unevaluatedProperties": false
+    },
+    "RunFinishedOutcome": {
+      "$anchor": "RunFinishedOutcome",
+      "description": "Why a run ended.",
+      "oneOf": [
+        { "$ref": "#/$defs/RunFinishedSuccessOutcome" },
+        { "$ref": "#/$defs/RunFinishedInterruptOutcome" }
+      ]
+    },
+    "RunFinishedSuccessOutcome": {
+      "$anchor": "RunFinishedSuccessOutcome",
+      "type": "object",
+      "description": "The run completed. Equivalent to an absent outcome. Closed like every other object, which is also what keeps it from carrying the suspended sibling's interrupts — a success with an interrupt still pending would be a contradiction, not an extension.",
+      "properties": {
+        "type": { "const": "success", "description": "Discriminator." }
+      },
+      "required": ["type"],
+      "unevaluatedProperties": false
+    },
+    "RunFinishedInterruptOutcome": {
+      "$anchor": "RunFinishedInterruptOutcome",
+      "type": "object",
+      "description": "The run is paused, waiting for something outside it. Resuming means starting a new run whose resume entries answer these interrupts.",
+      "properties": {
+        "type": { "const": "interrupt", "description": "Discriminator." },
+        "interrupts": {
+          "type": "array",
+          "description": "What the run is waiting for. At least one: an interrupt outcome with nothing to answer would leave a consumer with nothing to do.",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Interrupt" }
+        }
+      },
+      "required": ["type", "interrupts"],
+      "unevaluatedProperties": false
+    },
+    "SubagentFinishedOutcome": {
+      "$anchor": "SubagentFinishedOutcome",
+      "description": "Why a subagent's segment of a run ended. Mirrors RunFinishedOutcome one level down.",
+      "oneOf": [
+        { "$ref": "#/$defs/SubagentFinishedSuccessOutcome" },
+        { "$ref": "#/$defs/SubagentFinishedSuspendedOutcome" }
+      ]
+    },
+    "SubagentFinishedSuccessOutcome": {
+      "$anchor": "SubagentFinishedSuccessOutcome",
+      "type": "object",
+      "description": "The subagent completed its work. Equivalent to an absent outcome.",
+      "properties": {
+        "type": { "const": "success", "description": "Discriminator." }
+      },
+      "required": ["type"],
+      "unevaluatedProperties": false
+    },
+    "SubagentFinishedSuspendedOutcome": {
+      "$anchor": "SubagentFinishedSuspendedOutcome",
+      "type": "object",
+      "description": "The subagent is paused awaiting outside input. Terminal for this stream, not for the subagent: a later run may continue the same invocation once the interrupts are answered.",
+      "properties": {
+        "type": { "const": "suspended", "description": "Discriminator." },
+        "interruptIds": {
+          "type": "array",
+          "description": "The run-level interrupts this subagent raised itself. May be empty or absent: a subagent suspended because a descendant interrupted owns no interrupt of its own.",
+          "items": { "type": "string", "description": "An Interrupt.id." }
+        }
+      },
+      "required": ["type"],
+      "unevaluatedProperties": false
+    },
+    "Interrupt": {
+      "$anchor": "Interrupt",
+      "type": "object",
+      "description": "Something a run needs from outside before it can continue, such as an approval or a missing value.",
+      "allOf": [{ "$ref": "#/$defs/Attributable" }],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifies the interrupt. A resume entry answers it by this id."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the run stopped. An open string rather than an enumeration: the protocol does not attempt to classify every reason an agent might need input."
+        },
+        "message": {
+          "type": "string",
+          "description": "A human-readable prompt for whoever answers."
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "The tool call this interrupt concerns, when it is a tool approval."
+        },
+        "responseSchema": {
+          "type": "object",
+          "description": "A JSON Schema describing the answer this interrupt expects, so a consumer can build a form for it. Carried opaquely: the protocol does not constrain or validate it. Restricted to an object because TypeScript and Python both declare it that way; .NET holds it as any JSON, and the ticket that commissioned this schema lists it among the arbitrary-JSON fields. Following the two that constrain it keeps the schema from accepting documents the reference client rejects, at the cost of rejecting the boolean schemas JSON Schema also permits — a bare true for \"any answer\". Recorded as a known divergence rather than settled.",
+          "additionalProperties": true
+        },
+        "expiresAt": {
+          "type": "string",
+          "description": "When the interrupt stops being answerable. Deliberately unconstrained rather than a date-time format, because producers already disagree about the representation and tightening it here would reject streams that work today. The documented convention is ISO 8601, and a consumer comparing this value will parse it as a date, so a value that is not one leaves the interrupt looking permanently unexpired."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this interrupt."
+        }
+      },
+      "required": ["id", "reason"],
+      "unevaluatedProperties": false
+    },
+    "ResumeEntry": {
+      "$anchor": "ResumeEntry",
+      "type": "object",
+      "description": "An answer to one interrupt, sent on the run that continues from it.",
+      "properties": {
+        "interruptId": {
+          "type": "string",
+          "description": "The interrupt being answered."
+        },
+        "status": {
+          "type": "string",
+          "description": "Whether the interrupt was answered or abandoned.",
+          "enum": ["resolved", "cancelled"]
+        },
+        "payload": {
+          "description": "The answer the agent asked for and will act on. Any JSON value."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Envelope information about the response, such as signatures or routing keys, as opposed to payload, which is the answer itself."
+        }
+      },
+      "required": ["interruptId", "status"],
+      "unevaluatedProperties": false
+    },
+    "TokenUsage": {
+      "$anchor": "TokenUsage",
+      "type": "object",
+      "description": "Token counts for one provider and model. Every field is a label or a number — nothing content-bearing or identifying, no prompts, completions, messages, or thread, run and user identifiers.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Which provider served the request."
+        },
+        "model": {
+          "type": "string",
+          "description": "Which model served the request."
+        },
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Prompt tokens consumed. Bounded like timestamp and for the same reason: a count above the JSON safe-integer range does not survive a round trip, so a consumer would silently read a different number than the producer wrote."
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Completion tokens produced."
+        },
+        "totalTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Total tokens, as the provider reports it rather than as a sum the protocol computes."
+        },
+        "reasoningTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Tokens spent on reasoning, where the provider distinguishes them."
+        },
+        "cachedInputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Prompt tokens served from a provider cache."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "Message": {
+      "$anchor": "Message",
+      "description": "Any message in a conversation. Discriminated by role.",
+      "oneOf": [
+        { "$ref": "#/$defs/DeveloperMessage" },
+        { "$ref": "#/$defs/SystemMessage" },
+        { "$ref": "#/$defs/AssistantMessage" },
+        { "$ref": "#/$defs/UserMessage" },
+        { "$ref": "#/$defs/ToolMessage" },
+        { "$ref": "#/$defs/ActivityMessage" },
+        { "$ref": "#/$defs/ReasoningMessage" }
+      ]
+    },
+    "BaseMessage": {
+      "$anchor": "BaseMessage",
+      "type": "object",
+      "description": "The fields shared by the developer, system, assistant and user messages. Deliberately excludes content, because a user message's content may be an array while the others are strings, and composition here intersects rather than overrides: a base that constrained content to a string would make an array content invalid. The tool, activity and reasoning messages do not compose this, because they carry no name.",
+      "allOf": [{ "$ref": "#/$defs/Attributable" }],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifies the message within the conversation."
+        },
+        "role": {
+          "type": "string",
+          "description": "Who the message is from. Each message definition narrows this to a single value."
+        },
+        "name": {
+          "type": "string",
+          "description": "An optional display name for the author."
+        },
+        "encryptedValue": {
+          "type": "string",
+          "description": "A provider's opaque artefact belonging to this message, stored by a consumer and returned on a later turn."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this message."
+        }
+      },
+      "required": ["id", "role"]
+    },
+    "DeveloperMessage": {
+      "$anchor": "DeveloperMessage",
+      "type": "object",
+      "description": "Instructions from the application developer.",
+      "allOf": [{ "$ref": "#/$defs/BaseMessage" }],
+      "properties": {
+        "role": { "const": "developer" },
+        "content": {
+          "type": "string",
+          "description": "The instructions. Required: a developer message with nothing in it says nothing."
+        }
+      },
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
+    },
+    "SystemMessage": {
+      "$anchor": "SystemMessage",
+      "type": "object",
+      "description": "Instructions from the system.",
+      "allOf": [{ "$ref": "#/$defs/BaseMessage" }],
+      "properties": {
+        "role": { "const": "system" },
+        "content": {
+          "type": "string",
+          "description": "The instructions. Required."
+        }
+      },
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
+    },
+    "AssistantMessage": {
+      "$anchor": "AssistantMessage",
+      "type": "object",
+      "description": "A message from the agent. Content is optional because a turn may consist only of tool calls.",
+      "allOf": [{ "$ref": "#/$defs/BaseMessage" }],
+      "properties": {
+        "role": { "const": "assistant" },
+        "content": {
+          "type": "string",
+          "description": "What the agent said, if it said anything."
+        },
+        "toolCalls": {
+          "type": "array",
+          "description": "The tool calls this turn made.",
+          "items": { "$ref": "#/$defs/ToolCall" }
+        }
+      },
+      "required": ["id", "role"],
+      "unevaluatedProperties": false
+    },
+    "UserMessage": {
+      "$anchor": "UserMessage",
+      "type": "object",
+      "description": "A message from the person using the application.",
+      "allOf": [{ "$ref": "#/$defs/BaseMessage" }],
+      "properties": {
+        "role": { "const": "user" },
+        "content": {
+          "description": "What the person sent: either plain text, or an ordered list of parts for a multimodal message.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "$ref": "#/$defs/InputContent" } }
+          ]
+        }
+      },
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
+    },
+    "ToolMessage": {
+      "$anchor": "ToolMessage",
+      "type": "object",
+      "description": "What a tool returned, as a message in the conversation. Stands alone rather than composing BaseMessage, because it carries no name.",
+      "allOf": [{ "$ref": "#/$defs/Attributable" }],
+      "properties": {
+        "id": { "type": "string", "description": "Identifies the message." },
+        "role": {
+          "const": "tool",
+          "description": "Fixed. Declared here rather than inherited, because this message does not compose BaseMessage."
+        },
+        "content": {
+          "type": "string",
+          "description": "What the tool returned."
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "The call this answers."
+        },
+        "error": {
+          "type": "string",
+          "description": "Why the tool failed, when it did. Present alongside content rather than instead of it, so a partial result survives a failure."
+        },
+        "encryptedValue": {
+          "type": "string",
+          "description": "A provider's opaque artefact belonging to this message."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this message."
+        }
+      },
+      "required": ["id", "role", "content", "toolCallId"],
+      "unevaluatedProperties": false
+    },
+    "ActivityMessage": {
+      "$anchor": "ActivityMessage",
+      "type": "object",
+      "description": "Structured progress that is not conversation content, materialised as a message so it keeps its place in the sequence. Stands alone rather than composing BaseMessage, because its content is an object rather than a string.",
+      "allOf": [{ "$ref": "#/$defs/Attributable" }],
+      "properties": {
+        "id": { "type": "string", "description": "Identifies the message." },
+        "role": {
+          "const": "activity",
+          "description": "Fixed. Declared here rather than inherited, because this message does not compose BaseMessage."
+        },
+        "activityType": {
+          "type": "string",
+          "description": "What kind of activity this is. An open string: the set is the producer's."
+        },
+        "content": {
+          "type": "object",
+          "description": "The activity's payload, open by key.",
+          "additionalProperties": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this message."
+        }
+      },
+      "required": ["id", "role", "activityType", "content"],
+      "unevaluatedProperties": false
+    },
+    "ReasoningMessage": {
+      "$anchor": "ReasoningMessage",
+      "type": "object",
+      "description": "A span of the agent's reasoning, materialised as a message. Stands alone rather than composing BaseMessage, because it carries no name.",
+      "allOf": [{ "$ref": "#/$defs/Attributable" }],
+      "properties": {
+        "id": { "type": "string", "description": "Identifies the message." },
+        "role": {
+          "const": "reasoning",
+          "description": "Fixed. Declared here rather than inherited, because this message does not compose BaseMessage."
+        },
+        "content": { "type": "string", "description": "The reasoning text." },
+        "encryptedValue": {
+          "type": "string",
+          "description": "A provider's opaque reasoning artefact belonging to this message."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this message."
+        }
+      },
+      "required": ["id", "role", "content"],
+      "unevaluatedProperties": false
+    },
+    "ToolCall": {
+      "$anchor": "ToolCall",
+      "type": "object",
+      "description": "A call an assistant message made. Carries no subagent attribution of its own and inherits its containing message's, since several calls can share one parent.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifies the call. The answering tool message carries this as its toolCallId."
+        },
+        "type": {
+          "const": "function",
+          "description": "The only kind of call the protocol models."
+        },
+        "function": {
+          "$ref": "#/$defs/FunctionCall",
+          "description": "What is being called, and with what."
+        },
+        "encryptedValue": {
+          "type": "string",
+          "description": "A provider's opaque artefact belonging to this call."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information attached to this call. Carried here rather than folded into the containing message, because several calls can share one parent and merging them would make the result depend on their order."
+        }
+      },
+      "required": ["id", "type", "function"],
+      "unevaluatedProperties": false
+    },
+    "FunctionCall": {
+      "$anchor": "FunctionCall",
+      "type": "object",
+      "description": "The name and arguments of a tool call.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Which tool is being called."
+        },
+        "arguments": {
+          "type": "string",
+          "description": "The arguments as a JSON string, not as parsed JSON. Kept as written because a model can emit arguments that are not valid JSON, and losing them at the protocol boundary would hide the fault from the consumer that has to handle it."
+        }
+      },
+      "required": ["name", "arguments"],
+      "unevaluatedProperties": false
+    },
+    "InputContent": {
+      "$anchor": "InputContent",
+      "description": "One part of a multimodal user message. Discriminated by type.",
+      "oneOf": [
+        { "$ref": "#/$defs/TextInputContent" },
+        { "$ref": "#/$defs/ImageInputContent" },
+        { "$ref": "#/$defs/AudioInputContent" },
+        { "$ref": "#/$defs/VideoInputContent" },
+        { "$ref": "#/$defs/DocumentInputContent" }
+      ]
+    },
+    "TextInputContent": {
+      "$anchor": "TextInputContent",
+      "type": "object",
+      "description": "A text part.",
+      "properties": {
+        "type": { "const": "text", "description": "Discriminator." },
+        "text": { "type": "string", "description": "The text." }
+      },
+      "required": ["type", "text"],
+      "unevaluatedProperties": false
+    },
+    "ImageInputContent": {
+      "$anchor": "ImageInputContent",
+      "type": "object",
+      "description": "An image part.",
+      "properties": {
+        "type": { "const": "image", "description": "Discriminator." },
+        "source": {
+          "$ref": "#/$defs/InputContentSource",
+          "description": "Where the image comes from."
+        },
+        "metadata": {
+          "description": "Extra information about this part. Unconstrained rather than an object: inherited from the SDKs, which declare it unknown rather than a record; listed under known divergences in the README rather than resolved here."
+        }
+      },
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
+    },
+    "AudioInputContent": {
+      "$anchor": "AudioInputContent",
+      "type": "object",
+      "description": "An audio part.",
+      "properties": {
+        "type": { "const": "audio", "description": "Discriminator." },
+        "source": {
+          "$ref": "#/$defs/InputContentSource",
+          "description": "Where the audio comes from."
+        },
+        "metadata": {
+          "description": "Extra information about this part. Unconstrained, as on the other media parts."
+        }
+      },
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
+    },
+    "VideoInputContent": {
+      "$anchor": "VideoInputContent",
+      "type": "object",
+      "description": "A video part.",
+      "properties": {
+        "type": { "const": "video", "description": "Discriminator." },
+        "source": {
+          "$ref": "#/$defs/InputContentSource",
+          "description": "Where the video comes from."
+        },
+        "metadata": {
+          "description": "Extra information about this part. Unconstrained, as on the other media parts."
+        }
+      },
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
+    },
+    "DocumentInputContent": {
+      "$anchor": "DocumentInputContent",
+      "type": "object",
+      "description": "A document part.",
+      "properties": {
+        "type": { "const": "document", "description": "Discriminator." },
+        "source": {
+          "$ref": "#/$defs/InputContentSource",
+          "description": "Where the document comes from."
+        },
+        "metadata": {
+          "description": "Extra information about this part. Unconstrained, as on the other media parts."
+        }
+      },
+      "required": ["type", "source"],
+      "unevaluatedProperties": false
+    },
+    "InputContentSource": {
+      "$anchor": "InputContentSource",
+      "description": "Where a media part's bytes come from: carried inline, or referenced by URL.",
+      "oneOf": [
+        { "$ref": "#/$defs/InputContentDataSource" },
+        { "$ref": "#/$defs/InputContentUrlSource" }
+      ]
+    },
+    "InputContentDataSource": {
+      "$anchor": "InputContentDataSource",
+      "type": "object",
+      "description": "Bytes carried inline.",
+      "properties": {
+        "type": { "const": "data", "description": "Discriminator." },
+        "value": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "description": "The bytes, base64-encoded. contentEncoding is an annotation rather than a constraint in 2020-12, so a malformed string still validates here; rejecting one is the decoder's job."
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "What the bytes are. Required here, unlike on a URL source, because nothing else can tell a consumer how to read them."
+        }
+      },
+      "required": ["type", "value", "mimeType"],
+      "unevaluatedProperties": false
+    },
+    "InputContentUrlSource": {
+      "$anchor": "InputContentUrlSource",
+      "type": "object",
+      "description": "Bytes referenced by URL, fetched by whoever needs them.",
+      "properties": {
+        "type": { "const": "url", "description": "Discriminator." },
+        "value": {
+          "type": "string",
+          "description": "The URL. Deliberately not constrained to a URI format, so a scheme a producer already uses is not rejected here."
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "What the resource is, when the producer knows. Optional, because the response can say."
+        }
+      },
+      "required": ["type", "value"],
+      "unevaluatedProperties": false
+    },
+    "Context": {
+      "$anchor": "Context",
+      "type": "object",
+      "description": "A named piece of ambient information given to the agent for the run, distinct from the conversation.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "What this context is, for the agent to interpret."
+        },
+        "value": { "type": "string", "description": "The context itself." }
+      },
+      "required": ["description", "value"],
+      "unevaluatedProperties": false
+    },
+    "Tool": {
+      "$anchor": "Tool",
+      "type": "object",
+      "description": "A tool the agent may call.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The tool's name, as the agent will call it."
+        },
+        "description": {
+          "type": "string",
+          "description": "What the tool does, for the agent to decide when to use it."
+        },
+        "parameters": {
+          "description": "A JSON Schema describing the tool's arguments. Carried opaquely: the protocol does not constrain or validate it. Optional, because all three SDKs already treat it that way and a tool that takes no arguments has nothing to declare; an absent schema and an empty one mean the same thing to an agent."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Extra information about the tool, for consumers that attach their own rendering or routing information to it."
+        }
+      },
+      "required": ["name", "description"],
+      "unevaluatedProperties": false
+    },
+    "RunAgentInput": {
+      "$anchor": "RunAgentInput",
+      "type": "object",
+      "description": "A request to run an agent. Also echoed back as RUN_STARTED.input. Only threadId, runId and messages are required: those are the three the SDKs already agree on, and for tools and context an absent key and an empty array mean the same thing, so requiring them would catch nothing a producer could get wrong.",
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "description": "The conversation this run belongs to."
+        },
+        "runId": { "type": "string", "description": "Identifies this run." },
+        "protocolVersion": {
+          "type": "string",
+          "description": "The protocol version this consumer speaks, such as \"1.0\". Absent means the input was produced before the protocol carried a version — the versioning rules in the prose govern what each side does with that. Sent in-band rather than by the transport, so a recorded exchange stays self-describing."
+        },
+        "parentRunId": {
+          "type": "string",
+          "description": "The run that spawned this one."
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "description": "The state the run starts from."
+        },
+        "messages": {
+          "type": "array",
+          "description": "The conversation so far, in order.",
+          "items": { "$ref": "#/$defs/Message" }
+        },
+        "tools": {
+          "type": "array",
+          "description": "The tools the agent may call. Absent means none.",
+          "items": { "$ref": "#/$defs/Tool" }
+        },
+        "context": {
+          "type": "array",
+          "description": "Ambient information for the run. Absent means none.",
+          "items": { "$ref": "#/$defs/Context" }
+        },
+        "forwardedProps": {
+          "description": "Application-specific values passed through to the agent untouched. Any JSON value."
+        },
+        "resume": {
+          "type": "array",
+          "description": "Answers to the interrupts that ended a previous run, when this run continues from one.",
+          "items": { "$ref": "#/$defs/ResumeEntry" }
+        }
+      },
+      "required": ["threadId", "runId", "messages"],
+      "unevaluatedProperties": false
+    },
+    "JsonPatch": {
+      "$anchor": "JsonPatch",
+      "type": "array",
+      "description": "A JSON Patch document as defined by RFC 6902, referenced by STATE_DELTA.delta and ACTIVITY_DELTA.patch: an ordered sequence of operations applied to a target document. An empty array is a valid no-op patch. Whether the operations actually apply to the document they target is a runtime question RFC 6902 leaves to the applier; structural validity here says nothing about it.",
+      "items": { "$ref": "#/$defs/JsonPatchOperation" }
+    },
+    "JsonPatchOperation": {
+      "$anchor": "JsonPatchOperation",
+      "description": "A single RFC 6902 operation. Exactly one of the operation shapes must match, discriminated by op. Unlike the protocol's own objects, the operations are open: RFC 6902 section 4 requires members an operation does not define to be ignored rather than rejected, so a remove carrying a leftover value is a valid patch. Two of the RFC's rules are relations between values rather than shapes, so no static schema can express them and neither is checked here: a move whose from is a proper prefix of its path (section 4.4), and any operation whose pointer does not resolve in the target document. Both are the applier's to reject.",
+      "oneOf": [
+        { "$ref": "#/$defs/AddOperation" },
+        { "$ref": "#/$defs/RemoveOperation" },
+        { "$ref": "#/$defs/ReplaceOperation" },
+        { "$ref": "#/$defs/MoveOperation" },
+        { "$ref": "#/$defs/CopyOperation" },
+        { "$ref": "#/$defs/TestOperation" }
+      ]
+    },
+    "AddOperation": {
+      "$anchor": "AddOperation",
+      "type": "object",
+      "description": "Inserts value at path. RFC 6902 section 4.1.",
+      "properties": {
+        "op": {
+          "const": "add",
+          "description": "Discriminator for the add operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where to insert the value."
+        },
+        "value": {
+          "description": "The value to insert. Any JSON value, including null, which is a legitimate thing to add."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "RemoveOperation": {
+      "$anchor": "RemoveOperation",
+      "type": "object",
+      "description": "Removes the value at path. RFC 6902 section 4.2.",
+      "properties": {
+        "op": {
+          "const": "remove",
+          "description": "Discriminator for the remove operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to remove."
+        }
+      },
+      "required": ["op", "path"]
+    },
+    "ReplaceOperation": {
+      "$anchor": "ReplaceOperation",
+      "type": "object",
+      "description": "Replaces the value at path. RFC 6902 section 4.3.",
+      "properties": {
+        "op": {
+          "const": "replace",
+          "description": "Discriminator for the replace operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to replace."
+        },
+        "value": {
+          "description": "The replacement. Any JSON value, including null."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "MoveOperation": {
+      "$anchor": "MoveOperation",
+      "type": "object",
+      "description": "Moves the value at from to path. RFC 6902 section 4.4.",
+      "properties": {
+        "op": {
+          "const": "move",
+          "description": "Discriminator for the move operation."
+        },
+        "from": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is moved from."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is moved to."
+        }
+      },
+      "required": ["op", "from", "path"]
+    },
+    "CopyOperation": {
+      "$anchor": "CopyOperation",
+      "type": "object",
+      "description": "Copies the value at from to path. RFC 6902 section 4.5.",
+      "properties": {
+        "op": {
+          "const": "copy",
+          "description": "Discriminator for the copy operation."
+        },
+        "from": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is copied from."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "Where the value is copied to."
+        }
+      },
+      "required": ["op", "from", "path"]
+    },
+    "TestOperation": {
+      "$anchor": "TestOperation",
+      "type": "object",
+      "description": "Asserts that the value at path equals value. RFC 6902 section 4.6.",
+      "properties": {
+        "op": {
+          "const": "test",
+          "description": "Discriminator for the test operation."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "What to compare."
+        },
+        "value": {
+          "description": "The value the target must equal. Any JSON value, including null."
+        }
+      },
+      "required": ["op", "path", "value"]
+    },
+    "JsonPointer": {
+      "$anchor": "JsonPointer",
+      "type": "string",
+      "description": "A JSON Pointer as defined by RFC 6901. Either the empty string, meaning the whole document, or a sequence of slash-prefixed reference tokens in which a tilde is escaped as ~0 and a slash as ~1. A value with no leading slash, or a tilde followed by anything other than 0 or 1, is not a JSON Pointer.",
+      "pattern": "^(/([^/~]|~[01])*)*$"
+    }
+  }
+}

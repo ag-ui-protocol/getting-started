@@ -1,0 +1,140 @@
+---
+title: "Versioning and Compatibility"
+description: "Talking to an older peer, what may be dropped, and when losing content obliges a warning — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+Two parties on one stream are rarely the same age. This page states what each
+owes the other when they are not.
+
+## The default: additions are safe
+
+The protocol grows by adding — new event types, new optional fields, new members
+of an open union. Every such addition MUST be safe for an older party to meet,
+because [unrecognised material survives rather than aborting the
+run](/spec/draft/basic/processing).
+
+It follows that a producer MUST NOT place in an addition alone anything the
+protocol already has a described place for. Concretely: the run's outcome, the
+content of a message, the identity of a tool call and the result of one MUST
+travel in the fields the schema describes for them, never only in a new event
+type or a new property that an older consumer will drop.
+
+## Downgrading
+
+A party that knows its peer is older MAY translate the stream into a shape the
+peer understands. A downgrade removes or reshapes what is there; it MUST NOT
+invent meaning. Supplying an empty value for a field the older schema requires —
+an empty string where content is now absent — is reshaping and is permitted.
+Supplying a non-empty value the producer never sent is inventing meaning and is
+forbidden.
+
+A downgrade MUST NOT repair a malformed value on the way past. A known field
+carrying a value the schema rejects is fatal, and a shim that turns it into
+something acceptable hides a defect that would otherwise have been reported.
+
+Downgrades fall into two kinds, and the difference decides whether anyone has to
+be told.
+
+**Lossless.** The removed material adds nothing the older party could act on.
+Stripping `subagentRunId` for a peer with no concept of subagents is lossless in
+this sense: the events still arrive, they simply flatten into one thread. A
+lossless downgrade MAY be silent.
+
+**Lossy.** Content that carries meaning is dropped or degraded. Removing a
+lifecycle event, dropping a content part a peer cannot represent, or collapsing
+a structured value into a lesser one all lose something a reader would have seen.
+A lossy downgrade MUST emit a warning that names what was lost and why.
+
+The warning is for the developer, not the end user. It MUST identify the shape
+that was dropped, and SHOULD say what to upgrade to remove it. An implementation
+MAY offer a way to silence these warnings, and MUST NOT silence them by default.
+
+## Retired shapes
+
+A shape the protocol once described and no longer does is *retired*. Retirement
+is not deletion: an older producer still sends it, and a consumer that simply
+dropped it would break a working integration.
+
+- A retired shape MUST be recorded in the deprecation registry, together with
+  what replaces it, where the translation lives, and when the translation itself
+  expires.
+- A consumer SHOULD translate a retired shape into its replacement rather than
+  drop it.
+- That translation MUST run as middleware — before enforcement — because
+  enforcement judges against the current protocol, in which the retired shape is
+  simply unrecognised.
+- A translation that loses content in the process MUST warn, by the rule above.
+
+Once a retired shape's expiry has passed, an implementation MAY remove the
+translation, after which the shape is unrecognised like anything else.
+
+## Version negotiation
+
+The version travels in-band, on the two messages that open each side of the
+exchange, so a recorded exchange stays self-describing and no transport has to
+carry it:
+
+- A consumer declares the protocol version it speaks on
+  [`RunAgentInput.protocolVersion`](/spec/draft/basic/run-input#protocolversion).
+- A producer declares the version *it* speaks on
+  `RUN_STARTED.protocolVersion` — its own, never an echo of the input's. The
+  pair is the whole negotiation: each side states itself once, and a consumer
+  sees a downgrade the moment it happens.
+- Both fields are optional in the schema because absence means something: a
+  peer from before the protocol carried a version. An implementation of this
+  version MUST send its declaration, except where the consumer knows its peer
+  predates the field and omits it rather than hand an unknown input member to
+  an old parser.
+- The value is a version identifier this specification publishes — the
+  segment a frozen version lives under, `MAJOR.MINOR`, compared numerically
+  component by component (so `1.10` is newer than `1.9`). A declaration a
+  party cannot interpret is handled like a newer one: proceed, and SHOULD
+  warn.
+- A producer meeting a **newer minor of a line it implements** MUST serve the
+  run — additions are safe, by the rules above — answer with its own version,
+  and SHOULD warn. It MAY reject, before `RUN_STARTED`, only a declaration
+  from a major line it does not implement; a newer minor of its own line is
+  serveable by construction and MUST NOT be rejected for its version. A
+  consumer meeting a newer producer declaration proceeds under the
+  [processing model](/spec/draft/basic/processing) and SHOULD warn.
+- The declaration names what the run's stream *speaks*, not who is relaying
+  it: a proxy that forwards a run untranslated declares what the original
+  producer spoke, and one that translates declares what it emits. On a
+  [stream carrying several runs](/spec/draft/events/lifecycle#several-runs-on-one-stream)
+  each run's `RUN_STARTED` declares its own run, which is how a replay of
+  mixed-age history stays truthful; a producer generating runs live does not
+  change what it speaks mid-stream.
+- A transport MAY mirror the declaration into its own envelope — a media-type
+  parameter, say — for intermediaries that cannot read the body. The in-band
+  field is authoritative; a binding that mirrors defines how a mismatch is
+  treated.
+
+Where a party knows the other's version — declared in-band, or configured — it
+MAY select a downgrade on that basis. Where it does not, it MUST behave as
+though the peer were current: guessing downward would degrade streams for no
+reason.
+
+A downgrade selected by version MUST be a pure transformation of the stream. It
+MUST NOT change the run's outcome, alter identifiers, or reorder events.
+
+## What a producer owes
+
+- Declare the protocol version it speaks on `RUN_STARTED`.
+- Emit only shapes the current protocol describes.
+- Omit optional fields that have no value rather than sending `null`.
+- Never depend on the consumer understanding an addition.
+
+## What a consumer owes
+
+- Declare the protocol version it speaks on the run input, except toward a
+  peer it knows predates the field.
+- Survive unrecognised events, properties and union members; fail on malformed
+  known values.
+- Run middleware before enforcement, and enforcement before application code.
+- Warn when a translation loses content.
+- Never present material to application code that enforcement would have
+  removed.

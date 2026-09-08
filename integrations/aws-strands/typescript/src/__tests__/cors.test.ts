@@ -34,8 +34,10 @@ import {
  * cannot quietly grow an unasserted header, and so a test cannot pass by
  * restating the line above it. Every header is asserted for every posture,
  * `Access-Control-Allow-Credentials` included: the factory derives it from the
- * resolved origin, so its value is fixed per posture and an absent header is a
- * measured `null` rather than something left unchecked.
+ * resolved origin and the request's own, and every probe here calls from an
+ * origin naming a site, so its value is fixed per posture and an absent header
+ * is a measured `null` rather than something left unchecked. The calls from an
+ * origin naming none are in their own suite below.
  */
 function expectHeaders(actual: CorsHeaders, expected: MeasuredResponse): void {
   const project = (h: MeasuredResponse) => ({
@@ -185,6 +187,208 @@ describe("documented corsOrigin postures match the measured ones", () => {
     const documented = new Set(parseReadmeCorsOriginValues(readme));
     const measured = fixtureReadmeValues();
     expect([...documented].sort()).toEqual([...measured].sort());
+  });
+});
+
+/**
+ * The origin a browser sends as the literal string `null`.
+ *
+ * It arrives from a sandboxed iframe, a `file://` page and some redirect
+ * chains, and it names no site: anything able to produce the header is inside
+ * a policy that lists it. That is the same reasoning that withholds
+ * credentials from `"*"`, with one difference that makes it matter more.
+ * Browsers refuse the wildcard-plus-credentials pair outright, so a wildcard
+ * grant never reaches anyone; they accept the null-plus-credentials pair, so a
+ * grant here does reach the caller.
+ */
+const NULL_ORIGIN = "null";
+
+describe("a policy naming the null origin carries no credentials", () => {
+  it("admits `Origin: null` for a list naming it, and withholds credentials", async () => {
+    const { port, close } = await startApp({ corsOrigin: [NULL_ORIGIN] });
+    try {
+      const pre = await preflight(port, NULL_ORIGIN, {
+        requestHeaders: PROBE_REQUEST_HEADERS,
+      });
+      // Admitted: the list names this origin, so the allow-origin header is
+      // emitted and the denial is not what withholds the credentials header.
+      expect(pre.allowOrigin).toBe(NULL_ORIGIN);
+      expect(pre.allowCredentials).toBeNull();
+      const res = await postRun(port, { origin: NULL_ORIGIN });
+      // The response carrying the agent's output, which is the one whose
+      // credentials header decides whether cookies were sent to reach it.
+      expect(res.body).toContain("RUN_STARTED");
+      expect(res.allowOrigin).toBe(NULL_ORIGIN);
+      expect(res.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  // The two halves of the decision overlap for a caller from `null`, so these
+  // are where the policy half is observable on its own: a policy naming nothing
+  // but the null origin emits no credentials header to anybody, including the
+  // callers it was never going to admit in the first place.
+  it("emits no credentials header to any caller for a list naming only `null`", async () => {
+    const { port, close } = await startApp({ corsOrigin: [NULL_ORIGIN] });
+    try {
+      const res = await postRun(port, { origin: ALLOWED_ORIGIN });
+      // An allowlist miss, which ordinarily still carries the credentials
+      // header, because a named allowlist names a site even on a call that
+      // matched none of them. This list names none.
+      expect(res.allowOrigin).toBeNull();
+      expect(res.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  it("emits no credentials header to any caller for the `null` string", async () => {
+    const { port, close } = await startApp({ corsOrigin: NULL_ORIGIN });
+    try {
+      const res = await postRun(port, { origin: ALLOWED_ORIGIN });
+      // Echoed verbatim as a fixed origin string is, so this caller is told
+      // `null` is allowed and its browser refuses the response. No credentials
+      // header rides along with the echo.
+      expect(res.allowOrigin).toBe(NULL_ORIGIN);
+      expect(res.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  it("withholds credentials for the single-string spelling too", async () => {
+    const { port, close } = await startApp({ corsOrigin: NULL_ORIGIN });
+    try {
+      // Echoed verbatim like any single origin string, so the value reaches
+      // the wire whichever origin asked; only the credentials grant is
+      // withheld.
+      const pre = await preflight(port, NULL_ORIGIN);
+      expect(pre.allowOrigin).toBe(NULL_ORIGIN);
+      expect(pre.allowCredentials).toBeNull();
+      const res = await postRun(port, { origin: NULL_ORIGIN });
+      expect(res.allowOrigin).toBe(NULL_ORIGIN);
+      expect(res.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  it("costs a list naming `null` nothing but that caller's credentials", async () => {
+    const { port, close } = await startApp({
+      corsOrigin: [NULL_ORIGIN, ALLOWED_ORIGIN],
+    });
+    try {
+      // Still an allowlist, unlike the wildcard case: the concrete entry is
+      // honoured rather than collapsed away, and it keeps its credentials.
+      // Refusing the whole policy instead would take credentials away from a
+      // site the caller deliberately named.
+      const named = await postRun(port, { origin: ALLOWED_ORIGIN });
+      expect(named.allowOrigin).toBe(ALLOWED_ORIGIN);
+      expect(named.allowCredentials).toBe("true");
+      // A caller outside the list still misses, and still sees the credentials
+      // header a named allowlist carries even on a miss.
+      const other = await postRun(port, { origin: OTHER_ORIGIN });
+      expect(other.allowOrigin).toBeNull();
+      // The null caller is the only one refused, and only its credentials are.
+      const nul = await postRun(port, { origin: NULL_ORIGIN });
+      expect(nul.allowOrigin).toBe(NULL_ORIGIN);
+      expect(nul.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  // `corsOrigin: true` reflects whatever Origin the request carried, so it
+  // reaches the same place a list naming `null` does without naming anything:
+  // the reflection hands a null-origin caller its own origin back, and a
+  // browser honours that paired with credentials. Only the request half of the
+  // decision can see this, since the policy names no origin to inspect.
+  it("withholds credentials from a reflected null origin", async () => {
+    const { port, close } = await startApp({ corsOrigin: true });
+    try {
+      const pre = await preflight(port, NULL_ORIGIN);
+      expect(pre.allowOrigin).toBe(NULL_ORIGIN);
+      expect(pre.allowCredentials).toBeNull();
+      const res = await postRun(port, { origin: NULL_ORIGIN });
+      expect(res.allowOrigin).toBe(NULL_ORIGIN);
+      expect(res.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps credentials for every other caller under a reflecting policy", async () => {
+    const { port, close } = await startApp({ corsOrigin: true });
+    try {
+      // The counterweight to the test above: `true` is permissive by request
+      // and stays that way. Refusing the null caller must not turn the whole
+      // policy off for the origins it was reflecting before.
+      const res = await postRun(port, { origin: OTHER_ORIGIN });
+      expect(res.allowOrigin).toBe(OTHER_ORIGIN);
+      expect(res.allowCredentials).toBe("true");
+    } finally {
+      await close();
+    }
+  });
+
+  it("withholds credentials from a null caller under a fixed origin string", async () => {
+    const { port, close } = await startApp({ corsOrigin: ALLOWED_ORIGIN });
+    try {
+      const res = await postRun(port, { origin: NULL_ORIGIN });
+      // A fixed origin string is echoed to every caller, this one included, so
+      // the request half applies here too. The echo grants this caller nothing
+      // either way, since its browser compares the header against `null`; the
+      // credentials header is withheld rather than left to that comparison.
+      expect(res.allowOrigin).toBe(ALLOWED_ORIGIN);
+      expect(res.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+});
+
+// The same class of gap the check above closes, asked of the check itself: a
+// value that is `null` or a listed site in everything but its bytes. Both
+// spellings fail closed, so neither is a way back to a credentialed grant for
+// a caller the exact spelling would have refused.
+describe("mis-spelled origins cannot smuggle a value past the checks", () => {
+  it("never matches a mis-cased or slashed allowlist entry", async () => {
+    const { port, close } = await startApp({
+      corsOrigin: ["NULL", `${ALLOWED_ORIGIN}/`],
+    });
+    try {
+      // `cors` compares allowlist entries to the request's Origin with `===`,
+      // so neither entry can ever match: the allow-origin header is withheld
+      // and no browser is told anything is allowed.
+      const nul = await postRun(port, { origin: NULL_ORIGIN });
+      expect(nul.allowOrigin).toBeNull();
+      const named = await postRun(port, { origin: ALLOWED_ORIGIN });
+      expect(named.allowOrigin).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  it("echoes a mis-cased single origin string verbatim, and it matches nobody", async () => {
+    const { port, close } = await startApp({ corsOrigin: "NULL" });
+    try {
+      // A single origin string is never compared against the caller, so this
+      // reaches the wire as configured whoever asks. It grants nothing: a
+      // browser compares the header against its own origin serialization byte
+      // for byte, and no origin serializes to `NULL`, so every calling page is
+      // refused the response before the credentials header is consulted.
+      const attributable = await postRun(port, { origin: ALLOWED_ORIGIN });
+      expect(attributable.allowOrigin).toBe("NULL");
+      expect(attributable.allowCredentials).toBe("true");
+      // The one caller whose origin this was a mis-spelling of is refused the
+      // credentials header outright, by the request half of the decision.
+      const nul = await postRun(port, { origin: NULL_ORIGIN });
+      expect(nul.allowOrigin).toBe("NULL");
+      expect(nul.allowCredentials).toBeNull();
+    } finally {
+      await close();
+    }
   });
 });
 

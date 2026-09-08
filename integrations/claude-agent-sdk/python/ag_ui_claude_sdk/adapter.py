@@ -229,6 +229,21 @@ class ClaudeAgentAdapter:
         run_id = input_data.run_id or str(uuid.uuid4())
         result_key = (thread_id, run_id)
 
+        # Validate and convert the prompt before touching the thread's live
+        # SessionWorker. Unsupported content is an input error, not evidence
+        # that the existing Claude CLI session is broken.
+        try:
+            prompt, _ = process_messages(input_data)
+        except Exception as e:
+            logger.error(f"Invalid input for thread={thread_id}: {e}")
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=run_id,
+                message=str(e),
+            )
+            return
+
         # ── Run-admission serialization (Fix 1) ──
         # Acquire the per-thread RUN lock at admission — BEFORE worker.query() /
         # RUN_STARTED — and hold it across the WHOLE run, releasing in the
@@ -345,7 +360,6 @@ class ClaudeAgentAdapter:
                 worker = entry["worker"]
                 logger.debug(f"Reusing worker for thread={thread_id}")
 
-            prompt, _ = process_messages(input_data)
             message_stream = worker.query(prompt, session_id=thread_id)
 
             # Log parent_run_id if provided (for branching/time travel tracking)
@@ -1158,4 +1172,3 @@ class ClaudeAgentAdapter:
                 type=EventType.MESSAGES_SNAPSHOT,
                 messages=all_messages,
             )
-

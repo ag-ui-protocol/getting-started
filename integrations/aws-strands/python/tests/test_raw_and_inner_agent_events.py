@@ -116,6 +116,12 @@ CITATION = {
     "location": {"documentChar": {"documentIndex": 0, "start": 10, "end": 26}},
 }
 
+BEDROCK_METADATA = {
+    "usage": {"inputTokens": 67, "outputTokens": 324, "totalTokens": 391},
+    "metrics": {"latencyMs": 5199},
+    "trace": {"guardrail": {"actionReason": "Guardrail blocked."}},
+}
+
 
 def _find_citation_payload(event: Any) -> Optional[dict]:
     """Locate the citation payload in a RAW event, whatever shape it arrives in.
@@ -265,8 +271,14 @@ def _nested_agent(
 
 
 @pytest.mark.asyncio
-async def test_bedrock_citation_event_is_emitted_as_raw():
-    """A citation delta must reach the wire instead of being dropped."""
+async def test_citations_no_longer_reach_the_raw_fallback():
+    """The fallback is for events with no branch, and a citation now has one.
+
+    Citations were the reported case for issue #2291 and are translated onto
+    the assistant message's metadata now (see ``test_citations.py``). Sending
+    them here as well would rebuild the separate, correlate-it-yourself stream
+    that attaching to the message exists to avoid.
+    """
     strands_agent = StrandsAgentCore(
         model=ScriptedModel([_text_turn("Revenue grew.", citation=CITATION)]),
         callback_handler=None,
@@ -275,32 +287,29 @@ async def test_bedrock_citation_event_is_emitted_as_raw():
     events = await _collect(_wrap(strands_agent))
     _assert_stream_encodes(events)
 
-    raw_events = [e for e in events if e.type == EventType.RAW]
-    # ``CitationStreamEvent`` has TWO wire shapes across the range this package
-    # declares (``strands-agents>=1.15.0``), verified against every published
-    # 1.x wheel in that range:
-    #
-    #   1.15.0 – 1.20.0 : {"callback": {"citation": ..., "delta": ...}}
-    #   1.21.0 – latest : {"citation": ..., "delta": ...}
-    #
-    # The adapter is right either way — RAW forwards the provider's own payload
-    # verbatim rather than normalising a shape it does not own — so this test
-    # must accept both instead of pinning whichever one the lockfile happens to
-    # resolve. Asserting the top-level key alone made the suite fail on the
-    # locked 1.18.0 while passing locally on a newer resolution.
-    located = [
-        (e, payload)
-        for e in raw_events
-        for payload in [_find_citation_payload(e.event)]
-        if payload is not None
+    leaked = [
+        e.event
+        for e in events
+        if e.type == EventType.RAW and _find_citation_payload(e.event) is not None
     ]
-    assert located, (
-        "expected a RAW event carrying the Bedrock citation payload; "
-        f"got RAW events: {[e.event for e in raw_events]}"
+    assert leaked == [], f"citations reached the RAW fallback: {leaked}"
+
+
+@pytest.mark.asyncio
+async def test_bedrock_metadata_event_is_emitted_as_raw():
+    """Usage and guardrail metadata must reach the wire instead of being dropped."""
+    strands_agent = StrandsAgentCore(
+        model=ScriptedModel([_text_turn("Guardrail response.") + [{"metadata": BEDROCK_METADATA}]]),
+        callback_handler=None,
     )
-    event, payload = located[0]
-    assert event.source == "strands"
-    assert payload == CITATION
+
+    events = await _collect(_wrap(strands_agent))
+    _assert_stream_encodes(events)
+
+    raw_events = [event for event in events if event.type == EventType.RAW]
+    assert len(raw_events) == 1
+    assert raw_events[0].source == "strands"
+    assert raw_events[0].event == {"event": {"metadata": BEDROCK_METADATA}}
 
 
 @pytest.mark.asyncio
@@ -345,12 +354,17 @@ async def test_raw_fallback_does_not_disturb_mapped_events():
 
 
 @pytest.mark.asyncio
-async def test_raw_payloads_never_carry_invocation_state_injections():
+async def test_emitted_payloads_never_carry_invocation_state_injections():
     """`ModelStreamEvent.prepare()` merges `invocation_state` into any event
     holding a ``delta`` — the live ``Agent``, an OTel span, a telemetry
     ``Trace``, a ``UUID``. None of it is model output, and the ``Agent`` alone
     carries the system prompt, message history and model config. It must never
     be forwarded to a client, in any form, stringified or otherwise.
+
+    Asserted over the whole emitted stream rather than over RAW events alone,
+    because a delta-bearing event can now leave the adapter through more than
+    one door: from 1.21.0 the citation envelope carries the merged state too,
+    and citations reach the client as message metadata.
     """
     strands_agent = StrandsAgentCore(
         model=ScriptedModel([_text_turn("Revenue grew.", citation=CITATION)]),
@@ -366,9 +380,6 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
     )
     _assert_stream_encodes(events)
 
-    raw_events = [e for e in events if e.type == EventType.RAW]
-    assert raw_events, "expected at least one RAW event to inspect"
-
     forbidden = {
         "agent",
         "event_loop_cycle_id",
@@ -380,9 +391,9 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
         "auth_token",
         "tenant_id",
     }
-    for raw in raw_events:
-        leaked = forbidden & set(raw.event)
-        assert not leaked, f"invocation_state leaked into a RAW payload: {leaked}"
+    blob = json.dumps([e.model_dump(exclude_none=True) for e in events])
+    for key in forbidden:
+        assert f'"{key}"' not in blob, f"invocation_state leaked to the wire: {key}"
 
     # The locked SDK release does not merge custom caller keys into this
     # particular citation envelope, while newer supported releases do. Pin the
@@ -391,10 +402,9 @@ async def test_raw_payloads_never_carry_invocation_state_injections():
     sanitized = _sanitize_raw_event(merged_payload, invocation_state)
     assert sanitized == {"citation": CITATION}
 
-    # And nothing anywhere in the emitted payloads may be a stringified Agent:
-    # a `default=str` style escape hatch would pass the key check above while
-    # still shipping the system prompt and history to the browser.
-    blob = json.dumps([e.event for e in raw_events])
+    # And nothing anywhere may be a stringified Agent: a `default=str` style
+    # escape hatch would pass the key check above while still shipping the
+    # system prompt and history to the browser.
     assert "You are helpful" not in blob
     assert "strands.agent.agent.Agent" not in blob
     assert "<strands" not in blob

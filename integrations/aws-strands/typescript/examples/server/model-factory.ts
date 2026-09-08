@@ -33,6 +33,14 @@ export interface CreateModelOptions {
    * surface painting never streams on the Responses API.
    */
   openaiApi?: "chat" | "responses";
+  /**
+   * The provider's own hosted tools, e.g. `[{ type: "web_search" }]`.
+   * Responses API only, and the reason the citations demo runs on an OpenAI
+   * key: web search is the built-in whose annotations Strands maps to
+   * citations. The other providers have no equivalent and ignore it, so a demo
+   * that needs it should say so rather than silently degrading.
+   */
+  builtinTools?: Record<string, unknown>[];
 }
 
 export async function createModel(
@@ -58,8 +66,15 @@ export async function createModel(
       apiKey,
       modelId: process.env.MODEL_ID ?? "gpt-5.4",
       ...(options.openaiApi ? { api: options.openaiApi } : {}),
-      ...(reasoning
-        ? { params: { reasoning: { effort: "medium", summary: "auto" } } }
+      ...(reasoning || options.builtinTools
+        ? {
+            params: {
+              ...(reasoning
+                ? { reasoning: { effort: "medium", summary: "auto" } }
+                : {}),
+              ...(options.builtinTools ? { tools: options.builtinTools } : {}),
+            },
+          }
         : {}),
       ...(baseURL ? { clientConfig: { baseURL } } : {}),
     });

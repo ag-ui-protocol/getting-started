@@ -6,8 +6,23 @@ Helper functions for message processing, tool conversion, and prompt building.
 
 import json
 import logging
+from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any, Dict, List, Optional, Tuple
-from ag_ui.core import RunAgentInput, AssistantMessage, ToolCall, FunctionCall, ToolMessage
+from ag_ui.core import (
+    RunAgentInput,
+    AssistantMessage,
+    ToolCall,
+    FunctionCall,
+    ToolMessage,
+    TextInputContent,
+    ImageInputContent,
+    AudioInputContent,
+    VideoInputContent,
+    DocumentInputContent,
+    BinaryInputContent,
+    InputContentDataSource,
+    InputContentUrlSource,
+)
 
 from .config import STATE_MANAGEMENT_TOOL_NAME, STATE_MANAGEMENT_TOOL_FULL_NAME
 
@@ -89,7 +104,150 @@ def strip_mcp_prefix(tool_name: str) -> str:
     return tool_name
 
 
-def process_messages(input_data: RunAgentInput) -> Tuple[str, bool]:
+SUPPORTED_IMAGE_MEDIA_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+}
+
+
+def _normalized_media_type(value: Optional[str]) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    media_type = value.split(";", 1)[0].strip().lower()
+    return media_type or None
+
+
+def _require_non_empty_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _require_remote_url(value: Any, field: str) -> str:
+    from urllib.parse import urlsplit
+
+    url = _require_non_empty_string(value, field)
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{field} must be a valid http or https URL")
+    return url
+
+
+def _image_block(source: Any, field: str) -> Dict[str, Any]:
+    media_type = _normalized_media_type(getattr(source, "mime_type", None))
+    if isinstance(source, InputContentDataSource):
+        if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            raise ValueError(
+                f"{field}.mime_type must be image/jpeg, image/png, image/gif, or image/webp"
+            )
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": _require_non_empty_string(source.value, f"{field}.value"),
+            },
+        }
+    if isinstance(source, InputContentUrlSource):
+        if media_type is not None and media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            raise ValueError(f"{field}.mime_type is not a supported image type")
+        return {
+            "type": "image",
+            "source": {
+                "type": "url",
+                "url": _require_remote_url(source.value, f"{field}.value"),
+            },
+        }
+    raise ValueError(f"{field} must be a data or URL source")
+
+
+def _document_block(source: Any, field: str) -> Dict[str, Any]:
+    media_type = _normalized_media_type(getattr(source, "mime_type", None))
+    if isinstance(source, InputContentDataSource):
+        if media_type != "application/pdf":
+            raise ValueError(f"{field}.mime_type must be application/pdf")
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": _require_non_empty_string(source.value, f"{field}.value"),
+            },
+        }
+    if isinstance(source, InputContentUrlSource):
+        if media_type is not None and media_type != "application/pdf":
+            raise ValueError(f"{field}.mime_type must be application/pdf when provided")
+        return {
+            "type": "document",
+            "source": {
+                "type": "url",
+                "url": _require_remote_url(source.value, f"{field}.value"),
+            },
+        }
+    raise ValueError(f"{field} must be a data or URL source")
+
+
+def _legacy_binary_block(block: BinaryInputContent, index: int) -> Dict[str, Any]:
+    media_type = _normalized_media_type(block.mime_type)
+    if block.data:
+        source: Any = InputContentDataSource(
+            value=block.data,
+            mime_type=media_type or "",
+        )
+    elif block.url:
+        source = InputContentUrlSource(
+            value=block.url,
+            mime_type=media_type,
+        )
+    else:
+        raise ValueError(
+            f"content[{index}] uses an opaque file id, which the Claude Agent SDK adapter cannot resolve"
+        )
+
+    if media_type in SUPPORTED_IMAGE_MEDIA_TYPES:
+        return _image_block(source, f"content[{index}]")
+    if media_type == "application/pdf":
+        return _document_block(source, f"content[{index}]")
+    raise ValueError(f"content[{index}].mime_type is not supported")
+
+
+def _convert_content_block(block: Any, index: int) -> Optional[Dict[str, Any]]:
+    if isinstance(block, TextInputContent):
+        if not block.text.strip():
+            return None
+        return {
+            "type": "text",
+            "text": block.text,
+        }
+    if isinstance(block, ImageInputContent):
+        return _image_block(block.source, f"content[{index}].source")
+    if isinstance(block, DocumentInputContent):
+        return _document_block(block.source, f"content[{index}].source")
+    if isinstance(block, BinaryInputContent):
+        return _legacy_binary_block(block, index)
+    if isinstance(block, (AudioInputContent, VideoInputContent)):
+        raise ValueError(f"content[{index}] type {block.type} is not supported")
+    raise ValueError(f"content[{index}] has an unsupported type")
+
+
+async def _structured_user_message(
+    content: List[Dict[str, Any]],
+    session_id: str,
+) -> AsyncIterator[Dict[str, Any]]:
+    yield {
+        "type": "user",
+        "message": {"role": "user", "content": content},
+        "parent_tool_use_id": None,
+        "session_id": session_id,
+    }
+
+
+ClaudePrompt = str | AsyncIterable[Dict[str, Any]]
+
+
+def process_messages(input_data: RunAgentInput) -> Tuple[ClaudePrompt, bool]:
     """
     Process and validate all messages from RunAgentInput.
     
@@ -100,7 +258,9 @@ def process_messages(input_data: RunAgentInput) -> Tuple[str, bool]:
         input_data: RunAgentInput with messages array
         
     Returns:
-        Tuple of (user_message: str, has_pending_tool_result: bool)
+        Tuple of (user_message, has_pending_tool_result). ``user_message`` is
+        a string for plain text or a one-message async iterable for structured
+        content.
     """
     messages = input_data.messages or []
     
@@ -133,7 +293,8 @@ def process_messages(input_data: RunAgentInput) -> Tuple[str, bool]:
     
     # Extract content from the LAST message (any role - user, tool, or assistant)
     # Claude SDK manages conversation history via session_id, we just need the latest input
-    user_message = ""
+    user_message: ClaudePrompt = ""
+    has_user_content = False
     if messages:
         last_msg = messages[-1]
         
@@ -148,17 +309,21 @@ def process_messages(input_data: RunAgentInput) -> Tuple[str, bool]:
         # Handle different content formats
         if isinstance(content, str):
             user_message = content
+            has_user_content = bool(content)
         elif isinstance(content, list):
-            # Content blocks format - extract text from first text block
-            for block in content:
-                if hasattr(block, 'text'):
-                    user_message = block.text
-                    break
-                elif isinstance(block, dict) and 'text' in block:
-                    user_message = block['text']
-                    break
-    
-    if not user_message:
+            blocks = []
+            for index, block in enumerate(content):
+                converted = _convert_content_block(block, index)
+                if converted is not None:
+                    blocks.append(converted)
+            if blocks:
+                user_message = _structured_user_message(
+                    blocks,
+                    input_data.thread_id or "default",
+                )
+                has_user_content = True
+
+    if not has_user_content:
         logger.warning(f"No user message found in {len(messages)} messages")
     
     return user_message, has_pending_tool_result

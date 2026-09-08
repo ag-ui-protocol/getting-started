@@ -1,0 +1,52 @@
+# 📎 Agentic Chat with Citations
+
+## What This Demo Shows
+
+When a model answers over sources, it can return the passages its answer came
+from. This demo shows those reaching the client **attached to the message they
+annotate**, rather than as a second stream the frontend has to join back to the
+answer:
+
+1. **Attached, not correlated**: each citation rides the `citations` key of the
+   assistant message's own `metadata`
+2. **Arrives while streaming**: the list is republished as it grows, so sources
+   appear alongside the answer instead of after it
+3. **Survives history**: the same list travels on the message inside
+   `MESSAGES_SNAPSHOT`, so it is still there on the next turn
+
+The panel on the right reads the messages directly. Nothing in it subscribes to
+a citation event, because there isn't one.
+
+## How to Interact
+
+Ask something the assistant has to look up:
+
+- "What is the James Webb Space Telescope observing right now?"
+- "How does HTTP/3 differ from HTTP/2?"
+- "What changed in the most recent Node.js LTS release?"
+
+Each answer's sources appear on the right, grouped under the message that used
+them, with the quoted passage and how far into the answer the citation arrived.
+
+## What To Notice
+
+**Sources appear before the answer finishes.** A citation is attached to the
+next chunk of text after it arrives, so the panel fills in as the reply is still
+being written.
+
+**The position is approximate, and deliberately so.** A citation locates a span
+in the *source* document and carries no offset into the answer. The number shown
+is how much of the message had streamed when the citation arrived, which is the
+adapter's best effort rather than a guarantee from the model.
+
+**Ask a second question.** The first answer's sources stay put. That is the
+snapshot carrying the metadata rather than replacing the message without it.
+
+## Provider Note
+
+This demo runs on OpenAI's Responses API with the built-in web-search tool,
+because that is the citation source reachable with the key the dojo already has.
+Amazon Bedrock produces citations the same way over documents with citations
+enabled. Both reach the adapter as the same stream event and leave it in the
+same shape, so what you are seeing is the wire behaviour rather than one
+provider's quirk.

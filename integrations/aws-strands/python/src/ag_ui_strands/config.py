@@ -12,6 +12,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Mapping,
     Optional,
 )
 
@@ -131,12 +132,119 @@ class ToolBehavior:
     tool_stream_event_handler: Optional[ToolStreamEventHandler] = None
 
 
+ThreadAgentKwargsProvider = Callable[["RunAgentInput"], Mapping[str, Any]]
+"""Builds extra constructor kwargs for one thread's agent.
+
+See :attr:`StrandsAgentConfig.thread_agent_kwargs`.
+"""
+
+
+TemplateToolsProvider = Callable[
+    ["RunAgentInput"],
+    Awaitable[Optional[Iterable[Any]]] | Optional[Iterable[Any]],
+]
+"""Chooses which of the template's tools one request may see.
+
+See :attr:`StrandsAgentConfig.template_tools_provider`.
+"""
+
+
 @dataclass
 class StrandsAgentConfig:
     """Top-level configuration for the Strands agent adapter."""
 
     tool_behaviors: Dict[str, ToolBehavior] = field(default_factory=dict)
     state_context_builder: Optional[StateContextBuilder] = None
+    thread_agent_kwargs: Optional["ThreadAgentKwargsProvider"] = None
+    """Extra keyword arguments for each per-thread Strands ``Agent``.
+
+    The adapter builds one ``Agent`` per thread from the template it was given,
+    by reading the template's settings back off the built instance. Some
+    settings cannot be read back at all: Strands consumes them into internal
+    state during construction and keeps nothing under a name the adapter can
+    find. Others are readable but belong to the agent that owns them, so
+    handing the same instance to every thread would let one conversation
+    disturb another.
+
+    Either way the template is the wrong place to put them. This hook is the
+    supported route: it runs once per ``thread_id`` and whatever mapping it
+    returns is applied over the recovered kwargs, so a caller can set anything
+    the adapter cannot carry and override anything it can.
+
+    ``model``, ``system_prompt``, ``tools`` and ``session_manager`` stay the
+    adapter's to set, because they are what keeps threads apart and a run
+    coherent.
+
+    Called with the ``RunAgentInput`` that created the thread. If it raises,
+    the run yields ``RUN_ERROR`` and the thread is not cached, so the next
+    request retries it.
+    """
+    template_tools_provider: Optional["TemplateToolsProvider"] = None
+    """Which of the template agent's tools this request may see.
+
+    Called once per request with that request's ``RunAgentInput``, so the answer
+    can vary turn by turn on one thread: the caller's identity is in
+    ``forwarded_props`` or ``context``, and a tool the request must not reach is
+    simply left out of the returned iterable. May be async.
+
+    Return the tools themselves or their names, whichever is to hand. Return
+    ``None`` to decline filtering, which leaves every template tool available;
+    an empty iterable is a real answer and leaves none of them. A name the
+    template does not contribute is dropped with a warning, because this hook
+    narrows the wrapped agent's tools and cannot add one.
+
+    The container is checked rather than merely iterated. A ``str`` and a
+    ``Mapping`` are both refused: a bare name would come apart into characters,
+    and a permission map would have its keys read as an allow-list while its
+    values went unread, so a name mapped to ``False`` would still be allowed.
+    Lists, tuples, sets and generators are all accepted.
+
+    Applied to the live per-thread agent's tool registry, never by rebuilding
+    that agent: the instance holds the thread's ``SessionManager``, its native
+    interrupt checkpoint and its history, so replacing it to change a tool list
+    would discard a conversation and any approval waiting inside it.
+
+    Three consequences worth knowing:
+
+    - A tool in the batch a live interrupt checkpoint would resume stays
+      registered whatever this returns. The human's answer is about to be
+      routed back into that batch, and an absent tool turns it into a "tool not
+      found" the model re-fires. This is the rule ``sync_proxy_tools`` already
+      applies to a proxy parked in a frontend-tool interrupt. The exemption
+      does not outlast what it is for: the narrowing is re-applied inside the
+      run once the batch has been dispatched, before the model is asked again.
+    - History is never rewritten. A filtered-out tool's earlier calls and
+      results stay in the thread's messages, so the model can still read what
+      it did with a tool it can no longer call, and a provider that returns
+      different sets across turns does not invalidate the transcript.
+    - If it raises, the run yields ``RUN_ERROR`` with code
+      ``TEMPLATE_TOOLS_PROVIDER_ERROR`` and stops, matching
+      ``thread_agent_kwargs``. A filter that fails open would hand the model
+      tools the caller meant to withhold.
+
+    Client-declared tools on ``RunAgentInput.tools`` are outside this hook:
+    they are re-synchronised from the request every turn already, so a caller
+    that wants fewer of those sends fewer. Not applied on the multi-agent
+    orchestrator path, which has no template registry to filter.
+
+    One deployment note. With an external ``agents_by_thread`` map a
+    request-scoped wrapper is rebuilt per request while the cached thread agent
+    keeps the registry it already had, so a template whose tools are built per
+    request hands the adapter equivalent but not identical objects. Ownership
+    of a registry entry therefore falls back from object identity to the tool's
+    name plus "not one of the adapter's other producers". Stable tool objects
+    are still the simpler thing to hand it.
+
+    Example::
+
+        StrandsAgentConfig(
+            template_tools_provider=lambda input_data: (
+                ["read_docs"]
+                if (input_data.forwarded_props or {}).get("role") != "admin"
+                else None
+            )
+        )
+    """
     session_manager_provider: Optional[SessionManagerProvider] = None
     """Optional factory for creating per-thread SessionManager instances.
 

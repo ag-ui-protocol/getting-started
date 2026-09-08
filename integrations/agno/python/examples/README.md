@@ -1,55 +1,44 @@
-# Agno Finance Agent
+# Agno AG-UI Dojo server
 
-An Agno Agent with Finance tools for AG-UI that researches stock prices, analyst recommendations, and stock fundamentals.
+This project serves the Agno examples used by the AG-UI Dojo, including chat,
+reasoning, multimodal input, human-in-the-loop tools, shared state, predictive
+state, and generative UI.
 
-## Setup
+## Prerequisites
 
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
+- Python 3.12 through 3.x
+- [uv](https://docs.astral.sh/uv/)
+- `OPENAI_API_KEY` for the OpenAI examples
+- `GOOGLE_API_KEY` for the Gemini multimodal example
 
-### Prerequisites
+## Install and run
 
-1. Install uv: `pip install uv`
-2. Set your OpenAI API key: `export OPENAI_API_KEY="your-api-key"`
-
-### Installation
-
-```bash
-# Install dependencies
-uv sync
-
-# Activate the virtual environment
-uv shell
-```
-
-### Running the Agent
+Install exactly the versions in the committed lockfile:
 
 ```bash
-# Run the agent
-uv run python agent.py
+uv sync --frozen
 ```
 
-The agent will be available at `http://localhost:9001` (or the port specified by the `PORT` environment variable).
-
-## Development
+Start the server:
 
 ```bash
-# Install development dependencies
-uv sync --extra dev
-
-# Run tests
-uv run pytest
-
-# Format code
-uv run black .
-uv run isort .
-
-# Lint code
-uv run flake8 .
+uv run --frozen dev
 ```
 
-## Features
+The server listens on `http://localhost:9001` by default. Set `PORT` to use a
+different port.
 
-- Stock price lookup
-- Analyst recommendations
-- Stock fundamentals analysis
-- AG-UI compatible interface
+## Test
+
+```bash
+uv run --frozen python -m unittest discover -s tests
+```
+
+The startup regression imports every existing Dojo route and also builds AGUI
+interfaces for both an Agent and a Team.
+
+## Upgrading a durable database
+
+Agno 3 moves persisted runs into a separate table and adds user-isolation
+fields. Existing Agno 2 databases must be migrated before the upgraded server
+receives traffic. Follow [Migrating a durable database to Agno 3](MIGRATING_TO_AGNO_3.md).

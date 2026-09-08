@@ -1,0 +1,92 @@
+---
+title: "Key Changes"
+description: "What the 1.0 draft changes against the 0.x line — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+This page lists the behavioural changes the 1.0 draft makes against the 0.x
+line of the protocol, for reviewers who know 0.x and want the differences
+rather than the whole document. It is informative: the linked pages are the
+specification.
+
+## Major changes
+
+1. **The specification exists.** 0.x defined shapes; behaviour lived in the
+   TypeScript client. The rules on these pages — sequencing, unknown versus
+   malformed, warnings, attribution — are now normative, written in
+   [BCP 14](https://datatracker.ietf.org/doc/html/bcp14) language, with the
+   [schema](/spec/draft/schema) authoritative for structure and this
+   document authoritative for behaviour.
+
+2. **Runs report how they ended.** `RUN_FINISHED` carries an optional
+   `outcome`: absent or success means success, and the interrupt outcome
+   carries what the run is waiting for. With it come `Interrupt`, resume
+   entries on the [run input](/spec/draft/basic/run-input), and the
+   [interrupt–resume pattern](/spec/draft/basic/patterns/interrupt-resume).
+   Every producer written before outcomes existed is already conformant.
+
+3. **Subagents.** Delegated work is attributed with `subagentRunId` on the
+   events that can carry it, optionally announced by `SUBAGENT_STARTED` and
+   closed by `SUBAGENT_FINISHED` or `SUBAGENT_ERROR`, with
+   [rules for ownership, nesting, parallelism and termination](/spec/draft/events/subagents).
+
+4. **Reasoning replaces thinking.** The 0.x `THINKING_*` events are retired in
+   favour of the [reasoning family](/spec/draft/events/reasoning): spans,
+   streamed reasoning messages matched by `messageId`, and
+   `REASONING_ENCRYPTED_VALUE` for provider artefacts a consumer stores and
+   returns without reading. Retired shapes are translated at the
+   [compatibility boundary](/spec/draft/basic/versioning#retired-shapes), not
+   dropped.
+
+5. **Activity events.** `ACTIVITY_SNAPSHOT` and `ACTIVITY_DELTA` carry
+   [structured progress](/spec/draft/events/activity) as messages whose
+   content is an object, amended by JSON Patch.
+
+6. **Unknown versus malformed, normatively.** Unrecognised events, fields and
+   union members survive translation to enforcement, which drops an unknown
+   event and strips unknown members, warning as it goes; a malformed known
+   value is fatal. Nothing is removed before
+   the translators have had their chance, and both transports feed one
+   [processing pipeline](/spec/draft/basic/processing), which also states the
+   pipeline's one admitted narrowing for chunk fields.
+
+7. **The chunked form has rules.** First chunks MUST carry what opening
+   requires (`messageId` and role semantics for text, `toolCallId` and
+   `toolCallName` for tool calls); later chunks MAY omit them; a continuation
+   repeating an opener field with a conflicting value is fatal
+   ([streaming pattern](/spec/draft/basic/patterns/streaming)).
+
+8. **A binary wire.** The [HTTP + Protobuf binding](/spec/draft/basic/transports/http-protobuf)
+   is specified — negotiated by media type, 4-byte length-prefixed frames,
+   generated from the same schema, with cross-implementation parity pinned by
+   a shared byte corpus.
+
+## Minor changes
+
+1. `tools` and `context` on the run input are optional: absent and empty mean
+   the same thing ([Run input](/spec/draft/basic/run-input)).
+2. Metadata merge semantics are normative: per key, last write wins, no
+   recursion, per-family merge targets; the `ag-ui` key is reserved
+   ([Metadata](/spec/draft/basic/metadata)).
+3. Absent means absent: optional fields are omitted, never `null`
+   ([The event model](/spec/draft/basic#absent-means-absent)).
+4. `RUN_FINISHED` and `RUN_ERROR` MAY carry per-provider token usage.
+5. Input messages MAY carry multimodal content parts (text, image, audio,
+   video, document), by URL or inline data
+   ([Run input](/spec/draft/basic/run-input)).
+6. `TOOL_CALL_RESULT` is a message in its own right and does not reopen the
+   call it answers ([Tool calls](/spec/draft/events/tool-calls)).
+7. A late `RUN_ERROR` after `RUN_FINISHED` is admitted, reporting a failure
+   that surfaced after success was already reported
+   ([Runs and steps](/spec/draft/events/lifecycle)).
+8. A consumer keeps a stream it rejects apart from a run that reports its own
+   failure, and "treat the run as failed" is defined: surface it, never report
+   success, with the API shape left to the implementation
+   ([Runs and steps](/spec/draft/events/lifecycle#error-handling)).
+9. The protocol version travels in-band: consumers declare theirs on
+   `RunAgentInput.protocolVersion`, producers answer with their own on
+   `RUN_STARTED.protocolVersion`, and absence identifies a pre-versioning
+   peer ([Versioning](/spec/draft/basic/versioning#version-negotiation)).

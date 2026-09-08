@@ -122,11 +122,13 @@ describe("StrandsAgent.run — lifecycle", () => {
     expect(last.message).toBe("boom");
   });
 
-  it("classifies TypeError thrown during run as ADAPTER_BUG (code defect)", async () => {
-    // STRANDS_FORCE_STOP is reserved for SDK/provider failures (Bedrock
-    // throttling, upstream 5xx). TypeError/ReferenceError indicate the adapter
-    // itself is broken. Distinguishing the two lets operators tell "fix our
-    // code" from "retry against the SDK".
+  it("reports a TypeError thrown inside the SDK stream as a fault from outside", async () => {
+    // An integrator's tool throws the same types a defect in this adapter
+    // does, and everything Strands runs for the adapter throws past the same
+    // boundary, so `ADAPTER_BUG` cannot be claimed for what arrives there. It
+    // is not a case of its own either: Strands caught it mid-cycle, which is
+    // the forced stop, and it reports under the same code as the neighbouring
+    // failure above.
     const agent = scriptedStrandsAgent([], {
       stubOverrides: {
         stream: async function* () {
@@ -138,17 +140,132 @@ describe("StrandsAgent.run — lifecycle", () => {
     const last = events[events.length - 1] as unknown as {
       type: string;
       code: string;
+      message: string;
+    };
+    expect(last.type).toBe(EventType.RUN_ERROR);
+    expect(last.code).toBe("STRANDS_FORCE_STOP");
+    expect(last.message).toBe("cannot read property 'foo' of undefined");
+  });
+
+  it("still reports a defect in the adapter's own translation as ADAPTER_BUG", async () => {
+    // The regression guard for the boundary above: it must not have turned
+    // every TypeError into somebody else's. This one is thrown while the
+    // adapter reads an event it has already taken off the stream, which is its
+    // own code running and so is exactly what `ADAPTER_BUG` claims.
+    const hostileEvent = {} as AgentStreamEvent;
+    Object.defineProperty(hostileEvent, "type", {
+      get() {
+        throw new TypeError("event kind is not readable");
+      },
+    });
+    const agent = scriptedStrandsAgent([hostileEvent]);
+
+    const events = await collectQuietly(agent);
+    const last = events[events.length - 1] as unknown as {
+      type: string;
+      code: string;
     };
     expect(last.type).toBe(EventType.RUN_ERROR);
     expect(last.code).toBe("ADAPTER_BUG");
+  });
+
+  it("reports an unserializable tool result as a fault from outside", async () => {
+    // `JSON.stringify` throws over a BigInt and over a structure that refers
+    // back to itself, both of which an integrator's tool can return without
+    // noticing. The tool wrote the value, so the contract to fix is the
+    // tool's. This is the case the Python sibling reaches through
+    // `json.dumps`.
+    const circular: Record<string, unknown> = { name: "node" };
+    circular.self = circular;
+    const agent = scriptedStrandsAgent([
+      {
+        type: "afterToolCallEvent",
+        toolUse: { toolUseId: "backend-1", name: "backend_tool", input: {} },
+        tool: undefined,
+        result: { content: [{ json: circular }] },
+      } as unknown as AgentStreamEvent,
+    ]);
+
+    const events = await collectQuietly(agent);
+    const last = events[events.length - 1] as unknown as {
+      type: string;
+      code: string;
+      message: string;
+    };
+    expect(last.type).toBe(EventType.RUN_ERROR);
+    expect(last.code).toBe("STRANDS_ERROR");
+    expect(last.message).toContain("not JSON serializable");
+  });
+
+  it("keeps the original serialization failure as the reported fault's cause", async () => {
+    // The wrapper's contract, and what Python's `raise ... from exc` gives an
+    // operator: the stack that reaches the log names where serialization
+    // actually failed. Wrapping a freshly built Error instead leaves a `cause`
+    // whose stack starts in the wrapper.
+    const circular: Record<string, unknown> = { name: "node" };
+    circular.self = circular;
+    const agent = scriptedStrandsAgent([
+      {
+        type: "afterToolCallEvent",
+        toolUse: { toolUseId: "backend-1", name: "backend_tool", input: {} },
+        tool: undefined,
+        result: { content: [{ json: circular }] },
+      } as unknown as AgentStreamEvent,
+    ]);
+
+    // The failure OBJECT, not its text: only the object carries `cause`.
+    const logged: unknown[] = [];
+    const spy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        logged.push(...args);
+      });
+    try {
+      await collect(agent, minimalRunInput());
+    } finally {
+      spy.mockRestore();
+    }
+
+    const fault = logged.find(
+      (a): a is Error => a instanceof Error && a.name === "ForeignFault",
+    );
+    expect(fault).toBeDefined();
+    expect(fault!.message).toContain("not JSON serializable");
+    expect(fault!.cause).toBeInstanceOf(TypeError);
+    expect((fault!.cause as Error).message).toContain("circular");
+  });
+
+  it.each([
+    ["a scalar", "not an object"],
+    ["an array", ["not", "an", "object"]],
+  ])("emits no initial snapshot for %s state", async (_label, state) => {
+    // AG-UI types `state` as any value, so a scalar is a run and not a
+    // failure. It is not an initial STATE_SNAPSHOT either: filtering
+    // `messages` out is a keyed object's concern only, and taking an array
+    // through that filter put an index-keyed object on the wire that no
+    // client asked for. Python emits nothing here, so nothing is what a
+    // non-object gets.
+    const agent = scriptedStrandsAgent([]);
+    const events = await collect(agent, minimalRunInput({ state }));
+
+    const kinds = types(events);
+    expect(kinds).not.toContain(EventType.RUN_ERROR);
+    const snapshots = events
+      .filter((e) => e.type === EventType.STATE_SNAPSHOT)
+      .map((e) => (e as unknown as { snapshot: unknown }).snapshot);
+    // Only the terminal snapshot, which tracks the key/value merges tools
+    // publish and so starts empty for a state that carries none of them.
+    expect(snapshots).toEqual([{}]);
   });
 
   it("propagates a TypeError thrown after pendingHalt was set (M4)", async () => {
     // pendingHalt is set when a frontend tool fires; the surrounding `for await`
     // historically swallowed any post-halt stream error as the expected
     // "Stream ended" sentinel. TypeError/ReferenceError must escape that
-    // sentinel handling because they indicate code defects, not the normal
-    // halt-on-frontend-tool path.
+    // sentinel handling: the sentinel is identified by shape, and one of these
+    // can wear it, so a real failure would otherwise finish the run. Escaping
+    // the swallow is all that check does; the failure is reported as the
+    // forced stop like any other out of the same call.
     const stub = scriptedAgent([], {
       stream: async function* () {
         // Frontend tool sets pendingHalt …
@@ -193,7 +310,8 @@ describe("StrandsAgent.run — lifecycle", () => {
       | { code: string }
       | undefined;
     expect(error).toBeTruthy();
-    expect(error!.code).toBe("ADAPTER_BUG");
+    expect(error!.code).toBe("STRANDS_FORCE_STOP");
+    expect(types(events)).not.toContain(EventType.RUN_FINISHED);
   });
 });
 

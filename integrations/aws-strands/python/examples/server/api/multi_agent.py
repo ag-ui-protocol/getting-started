@@ -20,6 +20,7 @@ from strands import Agent
 from strands.multiagent import GraphBuilder
 from ag_ui_strands import StrandsAgent, create_strands_app
 from server.model_factory import create_model
+from server.settings import cors_origins
 
 env_path = Path(__file__).parent.parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
@@ -94,4 +95,4 @@ agui_agent = StrandsAgent(
     description="Strands Graph of researcher, analyst and writer agents",
 )
 
-app = create_strands_app(agui_agent, "/")
+app = create_strands_app(agui_agent, "/", origins=cors_origins())

@@ -92,7 +92,10 @@ def make_agent(native_tools=None, agents_by_thread=None, model=None):
         agents_by_thread=agents_by_thread,
         config=StrandsAgentConfig(
             tool_behaviors={
-                TOOL_NAME: ToolBehavior(interrupt_on_call=True),
+                TOOL_NAME: ToolBehavior(
+                    interrupt_on_call=True,
+                    continue_after_frontend_call=True,
+                ),
             }
         ),
     )

@@ -1,0 +1,38 @@
+# Deepagents Subagents: AG-UI Subagent Attribution
+
+This demo runs a **deepagents** supervisor that delegates to a research
+subagent, and shows **subagent attribution surfacing through AG-UI** to the
+frontend — including a human-in-the-loop pause raised *inside* the subagent.
+
+## What This Demo Shows
+
+- **Attribution.** As the subagent works, the integration stamps its events
+  with a `subagentRunId`, and that attribution transfers onto the messages it
+  produces. The chat groups those messages under a collapsible subagent card,
+  keyed by `subagentRunId` and labeled with the subagent's declared name.
+- **Lifecycle.** `SUBAGENT_STARTED` / `SUBAGENT_FINISHED` / `SUBAGENT_ERROR`
+  drive the card's status via the `useSubagent` hook — a pulsing dot while it
+  runs, a checkmark when it finishes, and a red mark if it fails — so you can
+  watch the delegation open and close in real time.
+- **HITL inside a subagent.** The research subagent calls a
+  `request_human_approval` tool that raises a LangGraph `interrupt()`. The
+  interrupt propagates out of the subagent to the top-level run, the dojo
+  renders an Approve/Reject prompt, and the decision resumes the subagent on
+  the same thread.
+
+## How to Interact
+
+Ask anything — the supervisor always delegates. The suggestion pill sends:
+
+- "Why is the sky blue? Answer in one sentence."
+
+The subagent card appears in the chat collapsed. Click it to expand the card and
+watch the research stream; the subagent then pauses for your approval before
+finalizing its answer.
+
+## Implementation Notes
+
+- The backend opts in with `emit_subagent_events=True`; the flag defaults to
+  off because released clients reject the `SUBAGENT_*` event types outright.
+- `subagentRunId` is an AG-UI message field (see `@ag-ui/core`) read straight
+  off `agent.messages`; grouping is plain filtering by that field.

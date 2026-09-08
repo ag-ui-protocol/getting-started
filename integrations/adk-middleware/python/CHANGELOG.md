@@ -7,9 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `add_adk_fastapi_endpoint()` and `create_adk_app()` accept extra keyword
+  arguments and forward them to `app.post` for the agent route (`name`,
+  `tags`, `operation_id`, `summary`, `dependencies`, `include_in_schema`,
+  ...), so an application can give the route the same metadata, OpenAPI
+  identity and dependencies as the rest of its API. The derived
+  `<path>/capabilities` and `/agents/state` routes keep their own identity,
+  because FastAPI requires a unique `operation_id` and `name` per operation.
+
 ## [0.7.0] - 2026-06-22
 
 ### Added
+
+- **FEATURE**: Endpoint-level agent resolver for FastAPI ADK middleware (#1846)
+  - `add_adk_fastapi_endpoint()` and `create_adk_app()` now accept an async
+    `agent_resolver(request, input_data)` hook that can select a request-scoped
+    `ADKAgent` after `extract_state_from_request` has merged request-derived
+    state. Returning `None` keeps the default agent.
+  - Resolver selection is applied consistently across the run endpoint,
+    the derived `<path>/capabilities` endpoint, and the experimental
+    `/agents/state` endpoint, keeping request routing, capability discovery,
+    and state lookup inside the same endpoint-layer abstraction boundary.
+  - New public helper `resolve_agent_from_message_history()` supports the
+    documented tool-result resumption convention: preserve the originating ADK
+    author as `AssistantMessage.name`, match the latest `ToolMessage` by
+    `tool_call_id`, and resolve that name against an application-owned agent
+    registry before falling back to normal routing.
 
 - **FEATURE**: A2UI (Agent-to-UI) generative-UI rendering for ADK agents (OSS-158, #1955)
   - Adds a `render_a2ui` sub-agent tool (`A2UISubAgentTool`, `get_a2ui_tool()`) that lets an ADK agent emit A2UI v0.9 server-to-client operations (`createSurface` / `updateComponents` / `updateDataModel`), which the runtime detects and renders against a client-registered catalog. `plan_a2ui_injection()` decides when to auto-inject the `generate_a2ui` tool, giving ADK the same auto-injection behavior the AWS Strands middleware already has (Strands parity).

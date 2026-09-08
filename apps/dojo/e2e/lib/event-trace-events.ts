@@ -49,6 +49,8 @@ const LANGCHAIN_MESSAGE_TYPES = new Set([
   "tool",
   "function",
 ]);
+// Keys MUST be lowercase: normalizeForwardedHeaders looks them up by the
+// lowercased header name, so a title-cased key here would never match.
 const FORWARDED_HEADER_TOKENS = new Map([
   ["x-forwarded-for", "<forwarded-for>"],
   ["x-forwarded-host", "<forwarded-host>"],
@@ -208,23 +210,72 @@ function isGeneratedIdentityField(
   );
 }
 
+// The predicate, not an inline `typeof` chain, is what lets the callee declare
+// a `Record<string, unknown>` parameter at all: reading the bag through
+// `Reflect.get` hands back `any`, which satisfies any parameter type and let an
+// array through unchecked, while an inline chain over `unknown` narrows only as
+// far as `object` and would not typecheck at the call site.
+//
+// All three clauses are load-bearing at runtime, not just for narrowing:
+// `typeof null === "object"`, so dropping the null check makes this accept
+// `null`, and dropping the `typeof` check makes it accept a string — both of
+// which `Object.entries` then reshapes or throws on.
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// `copilotkit_forwarded_headers` keys carry whatever spelling reached the agent.
+// The producer builds the bag by matching the `x-` prefix case-insensitively and
+// then emits each key verbatim, and a caller can put the key in
+// `config.configurable` themselves, so nothing upstream promises lowercase. Field names are case-insensitive (RFC 9110
+// §5.1), so match on the lowercased name — an upstream spelling change must not
+// turn a stable trace into an environment-dependent one.
+//
+// An entry the map does not name keeps its spelling and its value. That set is
+// open — the producer forwards every `x-` header verbatim — so an unnamed one
+// carrying a per-request value (`x-request-id`, `x-amzn-trace-id`) would churn
+// every golden it appears in. The remedy is to name it in
+// FORWARDED_HEADER_TOKENS, not to widen the match. Two spellings of one named
+// header collapse into a single entry, which is correct — they are the same
+// field, and how many hops spelled it is environment metadata too.
+function normalizeForwardedHeaders(
+  headers: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([header, value]): [string, unknown] => {
+      const lowercasedHeader = header.toLowerCase();
+      const token = FORWARDED_HEADER_TOKENS.get(lowercasedHeader);
+      return token === undefined ? [header, value] : [lowercasedHeader, token];
+    }),
+  );
+}
+
 function normalizeAppContextContent(value: string) {
   if (!value.startsWith(APP_CONTEXT_PREFIX)) return value;
 
+  let context: unknown;
   try {
-    const context: unknown = JSON.parse(value.slice(APP_CONTEXT_PREFIX.length));
-    if (typeof context !== "object" || context === null) return value;
-    const headers = Reflect.get(context, "copilotkit_forwarded_headers");
-    if (typeof headers !== "object" || headers === null) return value;
-
-    for (const [header, token] of FORWARDED_HEADER_TOKENS) {
-      if (Object.hasOwn(headers, header)) Reflect.set(headers, header, token);
-    }
-    return `${APP_CONTEXT_PREFIX}${JSON.stringify(context, null, 2)}`;
+    context = JSON.parse(value.slice(APP_CONTEXT_PREFIX.length));
   } catch {
     // This is ordinary message content unless it is valid App Context JSON.
+    // Only the parse is guarded: a bug in the rewrite below must surface, not
+    // degrade into silently unnormalized content.
     return value;
   }
+
+  if (!isPlainRecord(context)) return value;
+  const headers = context.copilotkit_forwarded_headers;
+  // Neither the presence nor the shape of this key is ours to assume: it is
+  // absent until an `x-` header arrives, and a caller can put any JSON value
+  // there. So this guard is what keeps `Object.entries(undefined)` from throwing
+  // on an everyday payload, and what keeps `Object.entries`/`Object.fromEntries`
+  // from reshaping a primitive or array bag into `{}` or `{"0": ...}`. Leave the
+  // whole content string untouched rather than re-serializing it, so a payload
+  // this rewrite does not understand survives byte-for-byte.
+  if (!isPlainRecord(headers)) return value;
+
+  context.copilotkit_forwarded_headers = normalizeForwardedHeaders(headers);
+  return `${APP_CONTEXT_PREFIX}${JSON.stringify(context, null, 2)}`;
 }
 
 /**

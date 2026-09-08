@@ -282,10 +282,10 @@ describe("interruptOnCall for a client-provided tool", () => {
       | (BaseEvent & { outcome?: { type?: string } })
       | undefined;
     expect(finished, "no RUN_FINISHED emitted").toBeDefined();
-    // `outcome` is absent on this finish, so `not.toBe("interrupt")` would hold
-    // trivially. Assert the absence directly, and that the adapter recorded no
+    // `not.toBe("interrupt")` would also hold on a finish carrying no outcome
+    // at all. Pin the success outcome itself, and that the adapter recorded no
     // interrupt to resume.
-    expect(finished!.outcome).toBeUndefined();
+    expect(finished!.outcome).toEqual({ type: "success" });
     expect(
       (
         agent as unknown as {

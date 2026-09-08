@@ -30,6 +30,9 @@ type Function = coretypes.FunctionCall
 type StateSnapshotEvent struct {
 	*BaseEvent
 	Snapshot any `json:"snapshot"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewStateSnapshotEvent creates a new state snapshot event
@@ -70,6 +73,9 @@ type JSONPatchOperation struct {
 type StateDeltaEvent struct {
 	*BaseEvent
 	Delta []JSONPatchOperation `json:"delta"`
+	// SubagentRunID attributes this event to a subagent invocation.
+	// Empty when the event comes from the root agent.
+	SubagentRunID string `json:"subagentRunId,omitempty"`
 }
 
 // NewStateDeltaEvent creates a new state delta event

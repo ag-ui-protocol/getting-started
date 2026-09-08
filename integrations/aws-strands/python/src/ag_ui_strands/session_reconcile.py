@@ -2,11 +2,16 @@
 
 Frontend tools are executed on the client, so server-side the proxy returns a
 placeholder ``toolResult`` (``"Forwarded to client"``). The real result only
-arrives on the next run inside ``RunAgentInput.messages``, keyed by the client's
-wire ``tool_call_id`` — which differs from the native ``toolUseId`` Strands
-persisted. The adapter records that wire->native mapping durably on the agent's
-session state (see ``AG_UI_WIRE_MAP_STATE_KEY``), so this module can find the
-persisted placeholder by native id and overwrite it with the real result.
+arrives on the next run inside ``RunAgentInput.messages``, under the same
+``toolUseId`` Strands persisted, so this module can find the persisted
+placeholder and overwrite it with the real result.
+
+Nothing on that continuation says who executed the call. The adapter therefore
+records the id of every frontend call it emits durably on the agent's session
+state (see ``AG_UI_FRONTEND_CALL_IDS_STATE_KEY``): membership there is what
+tells a client-executed result apart from one Strands produced itself. The ids
+are held in recorded order rather than as a bare set, because the size cap
+applied at emission evicts the oldest first.
 """
 
 from __future__ import annotations
@@ -15,10 +20,23 @@ from typing import Any, Iterable, Mapping, Tuple
 
 from .client_proxy_tool import PROXY_RESULT_PLACEHOLDER
 
-# Key under which the adapter stores the ``{wire_tool_call_id: native_toolUseId}``
-# map on the Strands agent's session state. Namespaced to avoid clashing with
-# user-managed state keys.
-AG_UI_WIRE_MAP_STATE_KEY = "__ag_ui_wire_to_native__"
+# Key under which the adapter stores the ids of the frontend tool calls it has
+# emitted, as a JSON list on the Strands agent's session state. Namespaced to
+# avoid clashing with user-managed state keys.
+#
+# The stored name predates the identifier unification, and so does the shape it
+# may hold: releases before that unification minted their own id per frontend
+# call and stored a ``{minted_id: toolUseId}`` mapping. Those minted ids name
+# nothing in the persisted history, so a reader that trusted them as provenance
+# would conclude there was nothing to correct and replay an uncorrected
+# placeholder to the model. The old shape is therefore discarded on read rather
+# than translated. Only a frontend call left in flight across the upgrade is
+# affected, and what happens to it depends on the checkpoint: an ordinary
+# continuation degrades to the legacy path, which forwards the client's answer
+# as a synthetic message, while one parked in an active checkpoint cannot be
+# resumed at all, because connecting the answer to the persisted placeholder
+# needs exactly the translation this adapter no longer performs.
+AG_UI_FRONTEND_CALL_IDS_STATE_KEY = "__ag_ui_wire_to_native__"
 
 # Key under which the adapter stores every ``toolUseId`` tool call metadata
 # (name, args, input, strands_tool_id) on the Strands agent's session state.
@@ -29,6 +47,28 @@ AG_UI_WIRE_MAP_STATE_KEY = "__ag_ui_wire_to_native__"
 # ``tool_behaviors`` gate + the frontend-placeholder skip) for the resumed
 # tool. Namespaced to avoid clashing with user-managed state keys.
 AG_UI_TOOL_CALL_MAP_STATE_KEY = "__ag_ui_tool_call_map__"
+
+
+def recorded_frontend_call_ids(agent: Any) -> list[str]:
+    """Return the frontend-call ids recorded on *agent*'s session state.
+
+    Both the continuation read and the emission write go through here so they
+    cannot disagree about the stored shape: a writer that coerced the legacy
+    mapping would persist its keys as a well-formed list, and every later read
+    would then trust ids that name nothing.
+    """
+    stored = agent.state.get(AG_UI_FRONTEND_CALL_IDS_STATE_KEY) or ()
+    # Accept only the shape this adapter writes. Anything else is either the
+    # pre-unification mapping (see the key's definition) or state some other
+    # writer left behind; a permissive read turns a stored string into one id
+    # per character and a stored number into a TypeError at the write site.
+    if not isinstance(stored, (list, tuple)):
+        return []
+    return [
+        call_id
+        for call_id in stored
+        if isinstance(call_id, str) and call_id.strip()
+    ]
 
 
 def _supports_repository_reconciliation(session_manager: Any, agent: Any) -> bool:
@@ -52,40 +92,6 @@ def _supports_repository_reconciliation(session_manager: Any, agent: Any) -> boo
         and callable(update_message)
     )
 
-def resolve_native_ids(
-    wire_to_native: Mapping[str, str],
-    frontend_results: Iterable[Mapping[str, Any]],
-) -> dict[str, Tuple[str, bool]]:
-    """Map client frontend results to Strands-native ``toolUseId``s.
-
-    Frontend tools are emitted under a fresh wire ``tool_call_id`` that differs
-    from the native ``toolUseId`` Strands persists. ``wire_to_native`` is the
-    durable map recorded at emission on the agent's session state and restored
-    on a continuation run (works cross-process and for delta-only payloads,
-    since it is keyed on the wire id the client always sends). Results whose
-    wire id is not in the map are dropped — the caller then degrades to the
-    legacy path rather than guessing.
-
-    Args:
-        wire_to_native: Map of wire ``tool_call_id`` -> native ``toolUseId``.
-        frontend_results: Items with ``wire_id``, ``text`` and ``is_error``.
-
-    Returns:
-        Map of native ``toolUseId`` -> ``(real result text, is_error)``
-        (unresolvable dropped). The flag travels with the text so the
-        reconciled ``toolResult`` can carry the client's failure signal, not
-        just its output.
-    """
-    resolved: dict[str, Tuple[str, bool]] = {}
-    for result in frontend_results:
-        native = wire_to_native.get(result.get("wire_id"))
-        if native is not None:
-            resolved[native] = (
-                result.get("text", ""),
-                bool(result.get("is_error")),
-            )
-    return resolved
-
 
 def reconcile_frontend_tool_results(
     session_manager: Any,
@@ -94,14 +100,14 @@ def reconcile_frontend_tool_results(
 ) -> set[str]:
     """Overwrite persisted placeholder ``toolResult`` blocks with real results.
 
-    ``pending_results`` MUST be keyed by the Strands-native ``toolUseId`` (use
-    :func:`resolve_native_ids` to translate client wire ids first).
+    ``pending_results`` MUST be keyed by the ``toolUseId`` Strands persisted,
+    which for a frontend call is also the id the client answers under.
 
     Args:
         session_manager: A Strands ``RepositorySessionManager`` (exposes
             ``session_id`` and ``session_repository``).
         agent: The Strands agent (exposes ``agent_id``).
-        pending_results: Map of native ``toolUseId`` -> ``(real result text,
+        pending_results: Map of ``toolUseId`` -> ``(real result text,
             is_error)``.
 
     Returns:
