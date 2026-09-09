@@ -3633,6 +3633,21 @@ class LangGraphAgent:
         elif event_type == LangGraphEventTypes.OnToolEnd:
             tool_call_output = event["data"]["output"]
 
+            # Issue #1742: ToolMessage.name can legitimately be None
+            # (LangChain default). Patch it on the actual object so that
+            # downstream consumers (langchain_messages_to_agui for
+            # MessagesSnapshotEvent) see a valid name — not just the
+            # ToolCallStartEvent emitted below.
+            tool_name_fallback = event.get("name") or "unknown"
+            if isinstance(tool_call_output, ToolMessage) and tool_call_output.name is None:
+                tool_call_output.name = tool_name_fallback
+            elif isinstance(tool_call_output, Command):
+                update = tool_call_output.update
+                if isinstance(update, dict):
+                    for msg in update.get("messages", []) or []:
+                        if isinstance(msg, ToolMessage) and msg.name is None:
+                            msg.name = tool_name_fallback
+
             if isinstance(tool_call_output, Command):
                 # Extract ToolMessages from Command.update. ``.update`` is
                 # typed as Optional[Any] upstream — it can be None, a dict,
