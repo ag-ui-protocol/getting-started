@@ -3465,6 +3465,20 @@ class LangGraphAgent:
                         self.active_run["id"],
                         MessageInProgress(id=public_parent_id, tool_call_id=public_call_id, tool_call_name=tool_call_data["name"])
                     )
+                    # Some providers (e.g. GLM) emit name + complete args in the
+                    # same first chunk instead of streaming arg deltas later.
+                    # Without this, TOOL_CALL_START is followed immediately by
+                    # TOOL_CALL_END and TOOL_CALL_ARGS is never produced.
+                    args_delta = tool_call_data.get("args")
+                    if args_delta:
+                        yield self._dispatch_event(
+                            ToolCallArgsEvent(
+                                type=EventType.TOOL_CALL_ARGS,
+                                tool_call_id=tool_call_data["id"],
+                                delta=dump_json_safe(args_delta),
+                                raw_event=event,
+                            )
+                        )
                 return
 
             if is_tool_call_args_event and should_emit_tool_calls:
