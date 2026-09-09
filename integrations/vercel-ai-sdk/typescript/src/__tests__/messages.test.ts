@@ -3,7 +3,7 @@ import type { Message } from "@ag-ui/client";
 import { convertMessagesToVercelAISDKMessages } from "../index";
 
 describe("convertMessagesToVercelAISDKMessages — tool results", () => {
-  it("sets isError false when the tool result has no error", () => {
+  it("sends a successful tool result as a plain text output", () => {
     const messages: Message[] = [
       { id: "t1", role: "tool", content: "42", toolCallId: "tc1" },
     ];
@@ -12,14 +12,15 @@ describe("convertMessagesToVercelAISDKMessages — tool results", () => {
       type: "tool-result",
       toolCallId: "tc1",
       toolName: "unknown",
-      result: "42",
-      isError: false,
+      output: { type: "text", value: "42" },
     });
   });
 
-  it("carries a tool error onto the AI SDK isError flag", () => {
+  it("carries a tool error onto the AI SDK error output type", () => {
     // A client-reported tool failure must reach the model as an error, not a
-    // silent success. AG-UI's ToolMessage.error sets the tool-result isError flag.
+    // silent success. AG-UI's ToolMessage.error maps to the v7 `error-text`
+    // output, which providers translate to their own error flag (the v4
+    // `isError` boolean this replaces).
     const messages: Message[] = [
       {
         id: "t1",
@@ -30,6 +31,9 @@ describe("convertMessagesToVercelAISDKMessages — tool results", () => {
       },
     ];
     const result = convertMessagesToVercelAISDKMessages(messages);
-    expect((result[0] as any).content[0].isError).toBe(true);
+    expect((result[0] as any).content[0].output).toEqual({
+      type: "error-text",
+      value: "Tool failed: invalid id",
+    });
   });
 });

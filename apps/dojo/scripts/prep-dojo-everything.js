@@ -99,6 +99,15 @@ const ALL_TARGETS = {
     name: "Mastra",
     cwd: path.join(integrationsRoot, "mastra/typescript/examples"),
   },
+  "vercel-ai-sdk": {
+    // In-process integration — the package is a workspace dependency of the
+    // dojo, so it's already installed and built by the top-level `dojo` /
+    // `dojo-dev` targets via `pnpm install` + `nx run-many -t build`. This
+    // entry is a no-op so `--only vercel-ai-sdk` doesn't warn.
+    command: "true",
+    name: "Vercel AI SDK (in-process)",
+    cwd: gitRoot,
+  },
   "pydantic-ai": {
     command: "uv sync",
     name: "Pydantic AI",

@@ -161,6 +161,21 @@ const ALL_SERVICES = {
       },
     },
   ],
+  "vercel-ai-sdk": [
+    {
+      // In-process integration — the agent is instantiated directly in
+      // apps/dojo/src/agents.ts, so there's no separate server to start.
+      // This entry exists only so `--only dojo,vercel-ai-sdk` doesn't warn
+      // about an unknown target. Unlike prep-dojo (where a `true` no-op is
+      // fine because prep waits for all commands to *finish*), run-dojo uses
+      // `concurrently(..., { killOthersOn: ["success"] })`, so a command that
+      // exits 0 would tear down the dojo with it. Block instead so the dojo
+      // keeps running.
+      command: "tail -f /dev/null",
+      name: "Vercel AI SDK (in-process)",
+      cwd: gitRoot,
+    },
+  ],
   "pydantic-ai": [
     {
       command: "uv run dev",

@@ -38,6 +38,7 @@ on:
           - integration-mastra
           - integration-pydantic-ai
           - integration-spring-ai
+          - integration-vercel-ai-sdk
           - integration-watsonx-py
           - integration-watsonx-ts
           - middleware-a2a

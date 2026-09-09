@@ -303,12 +303,11 @@ export const menuIntegrations = [
   //   name: "Built-in Agent",
   //   features: [],
   // },
-  // Disabled until we can support Vercel AI SDK v5
-  // {
-  //   id: "vercel-ai-sdk",
-  //   name: "Vercel AI SDK",
-  //   features: ["agentic_chat"],
-  // },
+  {
+    id: "vercel-ai-sdk",
+    name: "Vercel AI SDK",
+    features: ["agentic_chat"],
+  },
   {
     id: "middleware-starter",
     name: "Middleware Starter",

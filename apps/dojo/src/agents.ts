@@ -8,6 +8,9 @@ import { ServerStarterAgent } from "@ag-ui/server-starter";
 import { ServerStarterAllFeaturesAgent } from "@ag-ui/server-starter-all-features";
 import { MastraClient } from "@mastra/client-js";
 import { MastraAgent } from "@ag-ui/mastra";
+import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { LangGraphAgent, LangGraphHttpAgent } from "@ag-ui/langgraph";
 
 // pnpm may resolve separate @mastra/* installations for dojo vs @ag-ui/mastra,
 // which makes the client/agent types mismatch nominally on private fields. The
@@ -16,9 +19,6 @@ import { MastraAgent } from "@ag-ui/mastra";
 type RemoteAgentsOptions = Parameters<typeof MastraAgent.getRemoteAgents>[0];
 type LocalAgentsOptions = Parameters<typeof MastraAgent.getLocalAgents>[0];
 type MastraAgentOptions = ConstructorParameters<typeof MastraAgent>[0];
-// import { VercelAISDKAgent } from "@ag-ui/vercel-ai-sdk";
-// import { openai } from "@ai-sdk/openai";
-import { LangGraphAgent, LangGraphHttpAgent } from "@ag-ui/langgraph";
 import { AgnoAgent } from "@ag-ui/agno";
 import { LlamaIndexAgent } from "@ag-ui/llamaindex";
 import { CrewAIAgent } from "@ag-ui/crewai";
@@ -251,10 +251,9 @@ export const agentsIntegrations = {
     >;
   },
 
-  // Disabled until we can support Vercel AI SDK v5
-  // "vercel-ai-sdk": async () => ({
-  //   agentic_chat: new VercelAISDKAgent({ model: openai("gpt-4o") }),
-  // }),
+  "vercel-ai-sdk": async () => ({
+    agentic_chat: new VercelAISDKAgent({ model: openai("gpt-4o-mini") }),
+  }),
 
   langgraph: async () => ({
     ...mapAgents(

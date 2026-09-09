@@ -245,10 +245,19 @@ const agentFilesMapper: Record<
 
   "vercel-ai-sdk": () => ({
     agentic_chat: [
+      // Show the main agent class (constructor + run() wiring streamText
+      // into AG-UI) and the stream handler (the actual AI SDK v7 fullStream
+      // → AG-UI event mapping). These are the two files a reader needs to
+      // understand how the integration works end-to-end.
       path.join(
         __dirname,
         integrationsFolderPath,
-        `/vercel-ai-sdk/src/index.ts`,
+        `/vercel-ai-sdk/typescript/src/vercel-ai-sdk.ts`,
+      ),
+      path.join(
+        __dirname,
+        integrationsFolderPath,
+        `/vercel-ai-sdk/typescript/src/stream-handler.ts`,
       ),
     ],
   }),

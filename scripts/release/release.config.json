@@ -245,6 +245,13 @@
         { "name": "ag_ui_watsonx", "path": "integrations/watsonx/python", "ecosystem": "python", "buildSystem": "uv" }
       ]
     },
+    "integration-vercel-ai-sdk": {
+      "description": "Vercel AI SDK integration (TypeScript)",
+      "sharedVersion": false,
+      "packages": [
+        { "name": "@ag-ui/vercel-ai-sdk", "path": "integrations/vercel-ai-sdk/typescript", "ecosystem": "typescript" }
+      ]
+    },
     "middleware-a2a": {
       "description": "A2A Middleware (TypeScript)",
       "sharedVersion": false,

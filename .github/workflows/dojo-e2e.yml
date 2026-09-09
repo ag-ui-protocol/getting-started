@@ -262,10 +262,10 @@ jobs:
             test_path: tests/agUiDotnetTests
             services: ["dojo", "ag-ui-dotnet"]
             wait_on: http://localhost:9999,tcp:localhost:8023
-          # - suite: vercel-ai-sdk
-          #   test_path: tests/vercelAISdkTests
-          #   services: ["dojo"]
-          #   wait_on: http://localhost:9999
+          - suite: vercel-ai-sdk
+            test_path: tests/vercelAISdkTests
+            services: ["dojo"]
+            wait_on: http://localhost:9999
 
     steps:
       - name: Checkout code
