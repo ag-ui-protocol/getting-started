@@ -25,7 +25,8 @@ class MessageVariantsTest {
                 Arguments.of(new SystemMessage("m", "be helpful"), Role.SYSTEM),
                 Arguments.of(new AssistantMessage("m", "hi"), Role.ASSISTANT),
                 Arguments.of(new UserMessage("m", "hello"), Role.USER),
-                Arguments.of(new ToolMessage("m", "result", "c1"), Role.TOOL));
+                Arguments.of(new ToolMessage("m", "result", "c1"), Role.TOOL),
+                Arguments.of(new ReasoningMessage("m", "let me think"), Role.REASONING));
     }
 
     @ParameterizedTest(name = "{1}")
@@ -121,12 +122,41 @@ class MessageVariantsTest {
     }
 
     @Test
+    void reasoningMessageWithAndWithoutName() {
+        ReasoningMessage withName = new ReasoningMessage("m", "thinking", "brain");
+        assertEquals("brain", withName.name());
+        assertEquals("thinking", withName.content());
+        assertEquals(Role.REASONING, withName.role());
+
+        ReasoningMessage plain = new ReasoningMessage("m", "thinking");
+        assertNull(plain.name());
+        assertNull(plain.encryptedValue());
+    }
+
+    @Test
+    void reasoningMessagePreservesEncryptedValue() {
+        ReasoningMessage message = new ReasoningMessage("m", "thinking", "brain", "cipher");
+        assertEquals("cipher", message.encryptedValue());
+        assertEquals("brain", message.name());
+        assertEquals("thinking", message.content());
+        assertEquals(Role.REASONING, message.role());
+
+        assertNull(new ReasoningMessage("m", "thinking", "brain").encryptedValue());
+    }
+
+    @Test
+    void reasoningMessageRequiresIdAndContent() {
+        assertThrows(NullPointerException.class, () -> new ReasoningMessage(null, "c"));
+        assertThrows(NullPointerException.class, () -> new ReasoningMessage("m", null));
+    }
+
+    @Test
     void everyMessageVariantIsCovered() {
         long roles = messagesByRole().stream()
                 .map(args -> ((Message) args.get()[0]).role())
                 .distinct()
                 .count();
         assertEquals(Role.values().length, roles, "every role should have a sample message");
-        assertTrue(roles == 5);
+        assertTrue(roles == 6);
     }
 }

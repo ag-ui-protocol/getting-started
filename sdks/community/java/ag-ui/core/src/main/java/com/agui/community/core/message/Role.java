@@ -21,7 +21,10 @@ public enum Role {
     USER("user"),
 
     /** The result of a tool call, fed back into the conversation. */
-    TOOL("tool");
+    TOOL("tool"),
+
+    /** A reasoning (chain-of-thought) message produced by the assistant. */
+    REASONING("reasoning");
 
     private final String value;
 

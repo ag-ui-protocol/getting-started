@@ -123,6 +123,30 @@ class EventVariantsTest {
     }
 
     @Test
+    void reasoningMessageStartDefaultsRoleToReasoning() {
+        ReasoningMessageStartEvent event = new ReasoningMessageStartEvent("m");
+        assertEquals(Role.REASONING, event.role());
+
+        ReasoningMessageStartEvent explicit = new ReasoningMessageStartEvent("m", null, null, null);
+        assertEquals(Role.REASONING, explicit.role());
+    }
+
+    @Test
+    void reasoningMessageStartRejectsNonReasoningRole() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new ReasoningMessageStartEvent("m", Role.ASSISTANT, null, null));
+    }
+
+    @Test
+    void reasoningMessageStartRetainsThreeArgConstructor() {
+        ReasoningMessageStartEvent event = new ReasoningMessageStartEvent("r1", 123L, "original-event");
+        assertEquals("r1", event.messageId());
+        assertEquals(Role.REASONING, event.role());
+        assertEquals(123L, event.timestamp());
+        assertSame("original-event", event.rawEvent());
+    }
+
+    @Test
     void reasoningMessageChunkAllowsNullDelta() {
         ReasoningMessageChunkEvent event = new ReasoningMessageChunkEvent("m", null);
         assertNull(event.delta());
