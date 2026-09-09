@@ -22,7 +22,13 @@ from .types import (
     LangGraphReasoning,
 )
 from .utils import json_safe_stringify, make_json_safe
-from .endpoint import add_langgraph_fastapi_endpoint
+try:
+    from .endpoint import add_langgraph_fastapi_endpoint
+except ImportError:
+    # FastAPI is an optional dependency — only the HTTP endpoint helper needs it.
+    # The adapter itself (LangGraphAgent.run) is a FastAPI-free in-process async
+    # generator, so importing the package must not require the web stack. (gh #2067)
+    add_langgraph_fastapi_endpoint = None
 from .middlewares.state_streaming import StateStreamingMiddleware, StateItem
 from .a2ui_tool import (
     get_a2ui_tools,
