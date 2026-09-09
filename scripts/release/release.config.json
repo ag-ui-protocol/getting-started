@@ -69,6 +69,13 @@
         { "name": "@ag-ui/a2a", "path": "integrations/a2a/typescript", "ecosystem": "typescript" }
       ]
     },
+    "integration-adk-js": {
+      "description": "ADK JS integration (Google ADK JavaScript, TypeScript package)",
+      "sharedVersion": false,
+      "packages": [
+        { "name": "@ag-ui/adk-js", "path": "integrations/adk-middleware/js", "ecosystem": "typescript" }
+      ]
+    },
     "integration-adk-ts": {
       "description": "ADK integration (TypeScript)",
       "sharedVersion": false,

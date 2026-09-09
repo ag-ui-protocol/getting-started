@@ -15,6 +15,7 @@ on:
         type: choice
         options:
           - integration-a2a
+          - integration-adk-js
           - integration-adk-py
           - integration-adk-ts
           - integration-ag2

@@ -17,6 +17,7 @@
       "@ag-ui/a2ui-toolkit",
       "@ag-ui/a2a",
       "@ag-ui/adk",
+      "@ag-ui/adk-js",
       "@ag-ui/ag2",
       "@ag-ui/agno",
       "@ag-ui/aws-strands",

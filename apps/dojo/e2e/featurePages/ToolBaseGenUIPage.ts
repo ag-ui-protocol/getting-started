@@ -90,7 +90,7 @@ export class ToolBaseGenUIPage {
     // Find the visible carousel item (the active slide)
     const carouselItems = carousel.locator('[data-testid^="carousel-item-"]');
     const itemCount = await carouselItems.count();
-    let activeCard = null;
+    let activeCard: Locator | null = null;
 
     // Find the visible/active carousel item
     for (let i = 0; i < itemCount; i++) {

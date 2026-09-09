@@ -77,7 +77,7 @@ const renderArgs = (valid: boolean) =>
   JSON.stringify({ surfaceId: "hotel-comparison", components: valid ? [ROOT, CARD] : [ROOT], data: { items: HOTELS } });
 
 export function registerA2UIRecoveryFixtures(mockServer: LLMock): void {
-  const hasTool = (req: ChatCompletionRequest, name: string) => req.tools?.some((t: ToolDefinition) => t.function.name === name);
+  const hasTool = (req: ChatCompletionRequest, name: string) => req.tools?.some((t: ToolDefinition) => t.function.name === name) ?? false;
 
   // 1) Main agent: recovery prompt → call the generate_a2ui sub-agent tool.
   mockServer.addFixture({

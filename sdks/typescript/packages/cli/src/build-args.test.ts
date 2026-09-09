@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildCopilotKitCreateArgs } from "./build-args";
+import { buildCopilotKitCreateArgs, usesLocalAdkJsStarter } from "./build-args";
 
 test("uses copilotkit@latest and forwards name + --no-banner", () => {
   const args = buildCopilotKitCreateArgs({ langgraphPy: true }, "my-app");
@@ -40,4 +40,17 @@ test("maps each framework flag to its canonical -f value", () => {
     const args = buildCopilotKitCreateArgs(opts, "x");
     expect(args.slice(-2)).toEqual(["-f", expected]);
   }
+});
+
+test("keeps ADK-JS separate from the existing Python ADK scaffold", () => {
+  expect(usesLocalAdkJsStarter({ adkJs: true })).toBe(true);
+  expect(usesLocalAdkJsStarter({ adk: true })).toBe(false);
+  expect(buildCopilotKitCreateArgs({ adkJs: true }, "demo")).toEqual([
+    "copilotkit@latest",
+    "create",
+    "--no-banner",
+    "-n",
+    "demo",
+  ]);
+  expect(buildCopilotKitCreateArgs({ adk: true }, "demo").slice(-2)).toEqual(["-f", "adk"]);
 });

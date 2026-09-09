@@ -157,6 +157,15 @@ jobs:
         working-directory: apps/dojo/e2e
         run: pnpm check:event-trace-types
 
+      # aimock is owned by the dojo package, so install that package before
+      # type-checking fixtures imported by the ADK-JS suite.
+      - name: Install dojo dependencies for ADK-JS E2E type-check
+        run: pnpm install --frozen-lockfile --filter demo-viewer
+
+      - name: Type-check ADK-JS Playwright specs and fixtures
+        working-directory: apps/dojo/e2e
+        run: pnpm check:adk-js-e2e-types
+
   dojo:
     name: dojo / ${{ matrix.suite }}
     needs: check-generated-files
@@ -174,6 +183,10 @@ jobs:
             test_path: tests/adkMiddlewareTests
             services: ["dojo", "adk-middleware"]
             wait_on: http://localhost:9999,tcp:localhost:8010
+          - suite: adk-js
+            test_path: tests/adkJsTests
+            services: ["dojo"]
+            wait_on: http://localhost:9999
           - suite: agno
             test_path: tests/agnoTests
             services: ["dojo", "agno"]

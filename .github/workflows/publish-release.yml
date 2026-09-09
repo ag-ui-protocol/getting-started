@@ -95,6 +95,7 @@ on:
         type: choice
         options:
           - integration-a2a
+          - integration-adk-js
           - integration-adk-py
           - integration-adk-ts
           - integration-ag2
@@ -517,6 +518,7 @@ jobs:
             sdks/typescript/packages/*/dist/
             integrations/*/typescript/dist/
             integrations/**/typescript/dist/
+            integrations/adk-middleware/js/dist/
             middlewares/*/dist/
           retention-days: 1
 
@@ -715,10 +717,12 @@ jobs:
             sdks/typescript/packages/*/dist/
             integrations/*/typescript/dist/
             integrations/**/typescript/dist/
+            integrations/adk-middleware/js/dist/
             middlewares/*/dist/
             sdks/typescript/packages/*/package.json
             integrations/*/typescript/package.json
             integrations/**/typescript/package.json
+            integrations/adk-middleware/js/package.json
             middlewares/*/package.json
           retention-days: 1
 

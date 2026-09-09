@@ -56,6 +56,10 @@
             ]
           },
           {
+            "group": "Integrations",
+            "pages": ["integrations", "integrations/google-adk-js"]
+          },
+          {
             "group": "Draft Proposals",
             "pages": [
               "drafts/overview",

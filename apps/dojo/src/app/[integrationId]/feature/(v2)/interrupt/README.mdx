@@ -40,3 +40,11 @@ emitted, and the renderer reads the topic and attendee from there.
 Resume is keyed by `threadId` and needs no extra storage in these demos, since
 the pause and the resume land on the same live agent in the same process. A
 durable, cross-process resume requires a Strands `SessionManager`.
+
+## Google ADK-JS notes
+
+The `Google ADK (JavaScript)` example gives the model ADK's native
+`requestInputTool`. Its `adk_request_input` long-running call is translated by
+`@ag-ui/adk-js` into the same AG-UI interrupt outcome. The selected slot is
+returned as the matching ADK function response, allowing the existing ADK
+session to continue.

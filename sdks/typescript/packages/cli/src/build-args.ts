@@ -16,6 +16,12 @@ export interface FrameworkOptions {
   agno?: boolean;
   pydanticAi?: boolean;
   adk?: boolean;
+  adkJs?: boolean;
+}
+
+/** ADK-JS is scaffolded from the AG-UI-owned starter, not the Python ADK flow. */
+export function usesLocalAdkJsStarter(options: FrameworkOptions): boolean {
+  return options.adkJs === true;
 }
 
 /**
