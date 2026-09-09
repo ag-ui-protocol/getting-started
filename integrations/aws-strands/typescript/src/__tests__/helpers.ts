@@ -23,8 +23,12 @@ import {
   type RunAgentInput,
 } from "@ag-ui/core";
 
+import type OpenAI from "openai";
+import { OpenAIModel } from "@strands-agents/sdk/models/openai";
+
 import { StrandsAgent } from "../agent";
 import type { StrandsAgentConfig } from "../config";
+import { describeModelBoundHistory } from "../model-context";
 import { AG_UI_FRONTEND_CALL_IDS_STATE_KEY } from "../session-reconcile";
 
 export function minimalRunInput(
@@ -524,9 +528,16 @@ export function realStrandsAgent(
     throwOnCall?: number;
     /** Forwarded to every per-thread agent, so a hook can edit its state. */
     plugins?: unknown[];
+    /**
+     * A `ScriptedModel` subclass to drive the agent with, for a test that needs
+     * the model boundary to do more than replay (see the provider-rule doubles
+     * in the continuation suites). `turns` and `throwOnCall` are ignored when
+     * one is supplied, since the caller constructed it with its own script.
+     */
+    model?: ScriptedModel;
   } = {},
 ): { agent: StrandsAgent; model: ScriptedModel; template: StrandsAgentCore } {
-  const model = new ScriptedModel(turns, options.throwOnCall);
+  const model = options.model ?? new ScriptedModel(turns, options.throwOnCall);
   const template = new StrandsAgentCore({
     model,
     tools: (options.tools ?? []) as never,
@@ -654,6 +665,80 @@ export function expectNoRunError(events: BaseEvent[], label = "run"): void {
   const codes = errorCodes(events);
   expect(codes, `${label} emitted RUN_ERROR ${JSON.stringify(codes)}`).toEqual(
     [],
+  );
+}
+
+/**
+ * The request the real OpenAI Chat Completions adapter builds for `history`.
+ *
+ * The Strands SDK's OpenAI provider is the formatter under test, not a
+ * reimplementation of it: the only thing replaced is the transport, so what
+ * comes back is what the bridge would have put on the wire. The fake client is
+ * duck-typed to the one call `_streamChat` makes, hence the cast.
+ */
+export async function openAIBoundMessages(
+  history: readonly StrandsMessage[],
+): Promise<Array<Record<string, unknown>>> {
+  const captured: Array<{ messages: Array<Record<string, unknown>> }> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: {
+          messages: Array<Record<string, unknown>>;
+        }) => {
+          captured.push(request);
+          return (async function* () {})();
+        },
+      },
+    },
+  } as unknown as OpenAI;
+
+  const model = new OpenAIModel({ api: "chat", modelId: "gpt-4o", client });
+  for await (const _event of model.stream([...history])) {
+    // Drained so the adapter reaches its request build; the fake yields none.
+  }
+  return captured[0]!.messages;
+}
+
+/** Every assistant message with `tool_calls` is followed by its tool messages. */
+export function openAIAdjacency(
+  bound: Array<Record<string, unknown>>,
+): "ok" | `broken at [${number}]` {
+  for (let index = 0; index < bound.length; index++) {
+    const message = bound[index]!;
+    const toolCalls = message.tool_calls as unknown[] | undefined;
+    if (message.role !== "assistant" || !toolCalls?.length) continue;
+    const answers = bound.slice(index + 1, index + 1 + toolCalls.length);
+    if (
+      answers.length !== toolCalls.length ||
+      answers.some((answer) => answer.role !== "tool")
+    ) {
+      return `broken at [${index}]`;
+    }
+  }
+  return "ok";
+}
+
+/**
+ * Assert every tool call in a model-bound history is answered with nothing in
+ * between, the rule the splitting provider formatters (openai, litellm,
+ * mistral, writer, llamaapi, llamacpp) enforce.
+ *
+ * Those formatters turn one native user turn into several provider messages,
+ * and the turn's non-tool content becomes a message of its own emitted AHEAD
+ * of the tool messages, whatever the order of the blocks inside the turn. A
+ * turn that carries both a tool result and text therefore binds as
+ * `assistant(tool_calls) -> user(text) -> tool(result)`, and OpenAI answers
+ * that with HTTP 400 "An assistant message with 'tool_calls' must be followed
+ * by tool messages responding to each 'tool_call_id'".
+ */
+export function expectToolCallsAnsweredImmediately(
+  history: readonly unknown[],
+  label = "model-bound history",
+): void {
+  const described = describeModelBoundHistory(history);
+  expect(described, `${label}: ${described}`).toContain(
+    "tool-call adjacency=ok",
   );
 }
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import copy
+from typing import List
 from unittest.mock import MagicMock, patch
 
 import pytest
 from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
+from strands.models.model import Model
 from strands.session import SessionManager
 
 from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
@@ -26,6 +28,11 @@ from ag_ui.core import (
 from ag_ui_strands.agent import StrandsAgent
 from ag_ui_strands.config import StrandsAgentConfig
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
+from tests.provider_binding import (
+    SPLITTING_FORMATTERS,
+    assert_binds_cleanly,
+    bound_roles,
+)
 
 
 def _mock_session_manager() -> MagicMock:
@@ -899,9 +906,14 @@ class TestSessionFrontendToolReconciliation:
         )
 
         assert instance.stream_prompts == [None]
-        assert instance.model_messages[-1][-1]["content"][0] == {
+        # A delta-only store holds no question for the block to ride in, so it
+        # opens the history as a user turn of its own. That keeps the tool call
+        # answered by the turn right after it, which is what the splitting
+        # provider formatters need, and leaves the roles alternating.
+        assert instance.model_messages[-1][0]["content"][0] == {
             "text": "Context provided by the application:\n- account: premium"
         }
+        assert instance.model_messages[-1][-1]["content"][0].get("toolResult") is not None
         assert instance.messages[-1]["content"][0].get("toolResult") is not None
         persisted = sm.session_repository.list_messages(sm.session_id, "default")
         assert "Context provided by the application" not in repr(persisted)
@@ -1546,3 +1558,248 @@ class TestPreUnificationSessionState:
 
         assert instance.stream_prompts == []
         _assert_continuation_name_error(instance.collected_events, ["minted-1"])
+
+
+# ---------------------------------------------------------------------------
+# What the store keeps when a turn carries both an answer and a question
+# ---------------------------------------------------------------------------
+
+
+class _ToolThenTextModel(Model):
+    """Calls a tool while nothing has answered one, then answers in words.
+
+    Records the history it was handed on each call, which is the only place the
+    request the provider would receive is observable.
+    """
+
+    def __init__(self):
+        self.calls: List[List[dict]] = []
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kwargs):
+        self.calls.append(copy.deepcopy(messages))
+        answered = any(
+            "toolResult" in block
+            for message in messages
+            for block in message.get("content", [])
+        )
+        yield {"messageStart": {"role": "assistant"}}
+        if not answered:
+            yield {
+                "contentBlockStart": {
+                    "start": {"toolUse": {"toolUseId": "native-1", "name": "get_weather"}}
+                }
+            }
+            yield {"contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}}
+            yield {"contentBlockStop": {}}
+            yield {"messageStop": {"stopReason": "tool_use"}}
+            return
+        yield {"contentBlockDelta": {"delta": {"text": "done"}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": "end_turn"}}
+
+    def get_config(self):
+        return {}
+
+    def update_config(self, **kwargs):
+        pass
+
+    async def structured_output(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+_WEATHER = Tool(
+    name="get_weather",
+    description="w",
+    parameters={"type": "object", "properties": {}},
+)
+
+_FIRST_QUESTION = "what is the weather"
+_SECOND_QUESTION = "and in Paris?"
+_THIRD_QUESTION = "and in Berlin?"
+
+
+def _adapter_over(session, model=None):
+    """A fresh adapter and its model, as a restarted process would build them."""
+    from strands import Agent
+
+    model = model or _ToolThenTextModel()
+    adapter = StrandsAgent(
+        Agent(model=model, callback_handler=None),
+        name="test",
+        config=StrandsAgentConfig(session_manager_provider=lambda _i: session),
+    )
+    return adapter, model
+
+
+def _run_input(thread, run_id, messages):
+    return RunAgentInput(
+        thread_id=thread,
+        run_id=run_id,
+        state={},
+        messages=messages,
+        tools=[_WEATHER],
+        context=[],
+        forwarded_props={},
+    )
+
+
+def _answer_and_question(question):
+    """The payload that carries a tool result and the user's next turn."""
+    return [
+        UserMessage(id="u1", content=_FIRST_QUESTION),
+        AssistantMessage(
+            id="a1",
+            tool_calls=[
+                ToolCall(
+                    id="native-1",
+                    function=FunctionCall(name="get_weather", arguments="{}"),
+                )
+            ],
+        ),
+        ToolMessage(id="t1", tool_call_id="native-1", content="sunny, 22C"),
+        UserMessage(id="u2", content=question),
+    ]
+
+
+def _stored_turns(session, agent_id):
+    """The persisted conversation as ``(role, joined text)`` pairs, in order."""
+    return [
+        (
+            record.message["role"],
+            "".join(
+                block["text"]
+                for block in record.message.get("content", [])
+                if "text" in block
+            ),
+        )
+        for record in session.session_repository.list_messages(
+            session.session_id, agent_id
+        )
+    ]
+
+
+async def _drive(adapter, run_input):
+    events = [event async for event in adapter.run(run_input)]
+    assert [e for e in events if e.type == EventType.RUN_ERROR] == [], (
+        f"run {run_input.run_id} errored: {events}"
+    )
+    return events
+
+
+class TestATurnCarryingBothAnAnswerAndAQuestion:
+    """A continuation whose payload holds a tool result and the user's next
+    question has to reach the provider with both intact and in order, and leave
+    the store holding what the client actually sent.
+
+    The tempting repair is to fold the new question into the earlier one so the
+    conversation stops ending on two user turns. That costs both halves. The
+    provider is then answering the question it already answered, which is what
+    the dojo's two-prompt haiku demo catches. And on this session manager the
+    fold never reaches disk at all: it writes a message when it is added and
+    only ever rewrites the latest one, so an edit to an older message is an edit
+    the store never sees and the question is gone on reload.
+
+    So nothing is folded. These cases pin both halves: the request the provider
+    would receive, through the real formatters, and the store, read back after a
+    restart and then written to again.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", SPLITTING_FORMATTERS, ids=str)
+    async def test_the_provider_request_keeps_the_question_after_the_answer(
+        self, provider, tmp_path
+    ):
+        from strands.session.file_session_manager import FileSessionManager
+
+        thread = f"thread-request-{provider}"
+        session = FileSessionManager(session_id=thread, storage_dir=str(tmp_path))
+        adapter, model = _adapter_over(session)
+
+        await _drive(
+            adapter,
+            _run_input(thread, "run-1", [UserMessage(id="u1", content=_FIRST_QUESTION)]),
+        )
+        await _drive(
+            adapter, _run_input(thread, "run-2", _answer_and_question(_SECOND_QUESTION))
+        )
+
+        # The turn that carried both, as the provider's own formatter binds it.
+        bound = bound_roles(provider, model.calls[-1])
+        assert_binds_cleanly(provider, model.calls[-1])
+
+        # Chronological: the tool's answer, and only then the new question.
+        assert bound[-2:] == ["tool", "user"], bound
+        last = model.calls[-1][-1]
+        assert last["role"] == "user"
+        assert [block.get("text") for block in last["content"]] == [_SECOND_QUESTION]
+
+    @pytest.mark.asyncio
+    async def test_both_survive_a_session_reload_and_a_later_turn(self, tmp_path):
+        from strands.session.file_session_manager import FileSessionManager
+
+        thread = "thread-answer-and-question"
+        session = FileSessionManager(session_id=thread, storage_dir=str(tmp_path))
+        adapter, _ = _adapter_over(session)
+
+        await _drive(
+            adapter,
+            _run_input(thread, "run-1", [UserMessage(id="u1", content=_FIRST_QUESTION)]),
+        )
+        await _drive(
+            adapter, _run_input(thread, "run-2", _answer_and_question(_SECOND_QUESTION))
+        )
+        agent_id = adapter._agents_by_thread[thread].agent_id
+
+        # A restarted process, reading the thread back off disk.
+        reloaded = FileSessionManager(session_id=thread, storage_dir=str(tmp_path))
+        assert _stored_turns(reloaded, agent_id) == [
+            ("user", _FIRST_QUESTION),
+            ("assistant", ""),
+            ("user", ""),
+            ("user", _SECOND_QUESTION),
+            ("assistant", "done"),
+        ]
+
+        # And it can keep going. The earlier question stays where it was rather
+        # than being rewritten or reordered by the turn that follows it.
+        restarted, later_model = _adapter_over(reloaded)
+        await _drive(
+            restarted,
+            _run_input(
+                thread,
+                "run-3",
+                _answer_and_question(_SECOND_QUESTION)
+                + [UserMessage(id="u3", content=_THIRD_QUESTION)],
+            ),
+        )
+
+        assert _stored_turns(reloaded, agent_id) == [
+            ("user", _FIRST_QUESTION),
+            ("assistant", ""),
+            ("user", ""),
+            ("user", _SECOND_QUESTION),
+            ("assistant", "done"),
+            ("user", _THIRD_QUESTION),
+            ("assistant", "done"),
+        ]
+
+        # The later model call reads the same order the store holds.
+        seen = [
+            (
+                message["role"],
+                "".join(
+                    block["text"]
+                    for block in message.get("content", [])
+                    if "text" in block
+                ),
+            )
+            for message in later_model.calls[-1]
+        ]
+        assert seen == [
+            ("user", _FIRST_QUESTION),
+            ("assistant", ""),
+            ("user", ""),
+            ("user", _SECOND_QUESTION),
+            ("assistant", "done"),
+            ("user", _THIRD_QUESTION),
+        ]

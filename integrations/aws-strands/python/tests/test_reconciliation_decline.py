@@ -38,12 +38,13 @@ from strands.agent.state import AgentState
 from strands.hooks.registry import HookRegistry
 from strands.interrupt import Interrupt as StrandsInterrupt
 
-from ag_ui_strands.agent import StrandsAgent
+from ag_ui_strands.agent import StrandsAgent, describe_model_bound_history
 from ag_ui_strands.client_proxy_tool import PROXY_RESULT_PLACEHOLDER
 from ag_ui_strands.config import StrandsAgentConfig
 from ag_ui_strands.session_reconcile import AG_UI_FRONTEND_CALL_IDS_STATE_KEY
 from tests.hook_helpers import invoke_after_model_call, invoke_before_model_call
 from tests.interrupt_state_stub import InterruptStateStub
+from tests.provider_binding import SPLITTING_FORMATTERS, assert_binds_cleanly
 
 RECONCILE_LOGGER = "ag_ui_strands.agent"
 
@@ -81,6 +82,10 @@ class _MockStrandsCore:
         self.model = MagicMock()
         self.messages = []
         self.stream_prompts = []
+        # A deep copy of the history as it stood inside the model call, which
+        # is the only place the transient reshape is observable: it is undone
+        # again before the call returns.
+        self.model_messages = []
         self.hooks = HookRegistry()
         self.session_manager = session_manager
         self._interrupt_state = InterruptStateStub()
@@ -92,7 +97,15 @@ class _MockStrandsCore:
     async def stream_async(self, prompt):
         self.stream_prompts.append(prompt)
         self._interrupt_state.resume(prompt)
+        # Strands appends a text prompt as its own user turn before the model
+        # call. Reproduced here so the hooks below see the history the real SDK
+        # would have shown them.
+        if isinstance(prompt, str) and prompt:
+            self.messages.append({"role": "user", "content": [{"text": prompt}]})
+        elif isinstance(prompt, list):
+            self.messages.append({"role": "user", "content": prompt})
         invoke_before_model_call(self.hooks, self)
+        self.model_messages.append(copy.deepcopy(self.messages))
         invoke_after_model_call(self.hooks, self)
         return
         yield  # pragma: no cover - generator marker
@@ -415,7 +428,16 @@ class TestReplayThatWouldDropTheAnswer:
             )
 
         assert _errors(events) == []
-        assert core.messages == before
+        # The cached conversation is still there, with the answer added to it
+        # as its own turn. That is what the session store records; the model
+        # reads it folded into the question, which the class below covers.
+        assert core.messages == [
+            *before,
+            {
+                "role": "user",
+                "content": [{"text": "get_weather returned: sunny, 22C"}],
+            },
+        ]
         assert core.stream_prompts == ["get_weather returned: sunny, 22C"]
 
     @pytest.mark.asyncio
@@ -477,3 +499,75 @@ class TestReconciliationDisabled:
         assert core.stream_prompts == [
             'approveTool returned: {"approved": false}\nand now what?'
         ]
+
+
+# ---------------------------------------------------------------------------
+# What the carried answer binds to
+# ---------------------------------------------------------------------------
+
+
+class TestTheCarriedAnswerBindsCleanly:
+    """The answer the prompt carries must not break the tool call it answers.
+
+    When the cached history already ends on the turn that answers the tool call,
+    the tempting repair is to fold the prompt into that turn so the conversation
+    stays one user turn. That is the shape OpenAI refuses: the splitting
+    formatters emit the text as a message of its own ahead of the tool message,
+    leaving the call unanswered. So the prompt travels as its own turn, and this
+    checks the result against the real formatters rather than a description of
+    them.
+
+    Only the splitting family is asserted here. Its own turn means two
+    consecutive user messages, which the one-to-one family refuses, and that is
+    a pre-existing limitation of every path through this adapter rather than
+    something this scenario introduces.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", SPLITTING_FORMATTERS, ids=str)
+    async def test_the_history_the_model_reads_binds_cleanly(self, provider):
+        core = _no_session_core(_cached_history_awaiting_an_answer())
+
+        with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+            events = await _collect(
+                _adapter(),
+                _run_input(
+                    [ToolMessage(id="t1", tool_call_id="fe-1", content="sunny, 22C")],
+                    tools=[Tool(name="get_weather", description="w", parameters={})],
+                ),
+            )
+
+        assert _errors(events) == []
+        assert [message["role"] for message in core.messages] == [
+            "user",
+            "assistant",
+            "user",
+            "user",
+        ]
+        assert_binds_cleanly(provider, core.model_messages[0])
+
+    @pytest.mark.asyncio
+    async def test_the_answer_is_said_once_and_never_inside_the_tool_turn(self):
+        core = _no_session_core(_cached_history_awaiting_an_answer())
+
+        with patch("ag_ui_strands.agent.StrandsAgentCore", return_value=core):
+            await _collect(
+                _adapter(),
+                _run_input(
+                    [ToolMessage(id="t1", tool_call_id="fe-1", content="sunny, 22C")],
+                    tools=[Tool(name="get_weather", description="w", parameters={})],
+                ),
+            )
+
+        seen = core.model_messages[0]
+        assert describe_model_bound_history(seen) == (
+            "roles=[user, assistant, user, user] tool-call adjacency=ok "
+            "role alternation=broken at [3]"
+        )
+        said = repr(seen).count("get_weather returned: sunny, 22C")
+        assert said == 1, f"the answer was said {said} times: {seen}"
+        # Its own turn, so the store keeps it as the client sent it.
+        assert core.messages[-1] == {
+            "role": "user",
+            "content": [{"text": "get_weather returned: sunny, 22C"}],
+        }

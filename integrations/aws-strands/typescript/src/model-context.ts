@@ -160,26 +160,38 @@ export function pullWithModelContext<T, R>(
 // ---------------------------------------------------------------------------
 
 /**
- * What the before-hook did to `agent.messages`, so the after-hook and the
- * teardown can undo exactly that. `insert` added a whole user message at
- * `index`; `prepend` added one text block to the front of an existing user
- * turn's `content`. Both hold the inserted object so the restore removes by
- * identity rather than by position, in case the SDK moved things meanwhile.
+ * What `placeUserText` did to a message list, so a caller that owes a restore
+ * can undo exactly that. `insert` added a whole user message at `index`;
+ * `replace` swapped one of a turn's text blocks for a longer one; `splice`
+ * added a text block to a turn that had none. Each holds the object it put in
+ * place so the restore works by identity rather than by position, in case the
+ * SDK moved things meanwhile.
  */
-type ContextMutation =
+export type PlacedUserText =
   | {
       kind: "insert";
       messages: unknown[];
       index: number;
       inserted: StrandsMessage;
     }
-  | { kind: "prepend"; content: unknown[]; inserted: TextBlock };
+  | { kind: "splice"; content: unknown[]; inserted: TextBlock }
+  | {
+      kind: "replace";
+      content: unknown[];
+      index: number;
+      original: unknown;
+      inserted: TextBlock;
+    };
 
 /** Agents that already carry the hook pair, so a re-run installs nothing. */
 const hookedAgents = new WeakSet<object>();
 
-/** The in-flight mutation per agent; absent between model calls. */
-const mutations = new WeakMap<object, ContextMutation>();
+/**
+ * The in-flight mutations per agent, in the order they were applied; absent
+ * between model calls. Undone back to front, so an earlier one's indices are
+ * still meaningful when it is reversed.
+ */
+const mutations = new WeakMap<object, PlacedUserText[]>();
 
 type MessagesOwner = { messages?: unknown };
 
@@ -189,25 +201,199 @@ type MessagesOwner = { messages?: unknown };
  * plain-object form carries the `toolResult` key itself. Both shapes occur,
  * and the run loop's own tail check reads them the same way.
  */
-function isToolResultBlock(block: unknown): boolean {
+export function isToolResultBlock(block: unknown): boolean {
   if (block === null || typeof block !== "object") return false;
   const record = block as { toolResult?: unknown; type?: unknown };
   return record.toolResult !== undefined || record.type === "toolResultBlock";
 }
 
+/** Whether a content block is plain text. */
+function isTextBlock(block: unknown): block is { text: string } {
+  return (
+    block !== null &&
+    typeof block === "object" &&
+    typeof (block as { text?: unknown }).text === "string"
+  );
+}
+
+/** Whether a message is a user turn that answers a tool call. */
+function carriesToolResult(message: unknown): boolean {
+  const content = (message as { content?: unknown } | null)?.content;
+  return Array.isArray(content) && content.some(isToolResultBlock);
+}
+
 /**
- * Place the run's block in front of the model, mirroring Python's
- * `_TransientModelContextHook._before_model_call` case for case:
+ * Index of the latest user turn that carries no tool result, or `-1`.
  *
- * - No user message at all: append the block as a new user turn.
- * - The latest user turn carries a tool result: prepend the block into that
- *   same turn. A separate user message between an assistant `toolUse` and its
- *   `toolResult` is a shape providers reject, so the block rides inside.
- * - Otherwise: insert the block as its own user message immediately BEFORE
- *   the latest user turn. The actual latest turn stays byte-identical for
- *   model routers and fixtures that key off it, while live UI context lands
- *   next to the question it belongs to rather than at the head of stale
- *   history.
+ * That turn is the question: the last thing the person typed that the model
+ * is answering. It is the only place text can be added to a history whose
+ * tail answers a tool call without breaking one of the two rules below.
+ */
+export function latestQuestionIndex(messages: unknown): number {
+  if (!Array.isArray(messages)) return -1;
+  return latestQuestionIndexIn(messages);
+}
+
+function latestQuestionIndexIn(messages: readonly unknown[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index] as { role?: unknown } | undefined;
+    if (message?.role !== "user") continue;
+    if (carriesToolResult(message)) continue;
+    return index;
+  }
+  return -1;
+}
+
+/**
+ * Report the two provider-binding properties of a native Strands history.
+ *
+ * Every provider formatter the Strands SDKs ship reads a native history one of
+ * two ways, and each way enforces its own rule:
+ *
+ * - The splitting formatters (openai, litellm, mistral, writer, llamaapi,
+ *   llamacpp) turn one user turn into several provider messages: the turn's
+ *   non-tool content becomes a message of its own, emitted AHEAD of the tool
+ *   messages the same turn's tool results become, whatever the order of the
+ *   blocks inside the turn. So a turn that carries both text and a tool result
+ *   binds as `assistant(tool_calls) -> user(text) -> tool(result)`, and OpenAI
+ *   answers that with HTTP 400 "An assistant message with 'tool_calls' must be
+ *   followed by tool messages responding to each 'tool_call_id'".
+ * - The one-to-one formatters (anthropic, bedrock, gemini) map each native
+ *   message to one provider message, so two consecutive user turns bind as two
+ *   consecutive user messages, which those providers reject for failing role
+ *   alternation.
+ *
+ * `adjacency` is therefore about the first family and `alternation` about the
+ * second, and a history has to satisfy both because the bridge does not know
+ * which provider the host configured. Indices name the offending message's
+ * position in the native history.
+ */
+export function describeModelBoundHistory(messages: unknown): string {
+  if (!Array.isArray(messages)) return "roles=[] (no history)";
+  const roles = messages.map(
+    (message) => String((message as { role?: unknown })?.role ?? "?"),
+  );
+
+  let adjacency = "ok";
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index] as { role?: unknown; content?: unknown };
+    if (message?.role !== "user") continue;
+    if (!carriesToolResult(message)) continue;
+    const content = message.content as unknown[];
+    if (content.some((block) => !isToolResultBlock(block))) {
+      adjacency = `broken at [${index}]`;
+      break;
+    }
+    const previous = messages[index - 1] as { role?: unknown } | undefined;
+    if (previous?.role !== "assistant") {
+      adjacency = `broken at [${index}]`;
+      break;
+    }
+  }
+
+  let alternation = "ok";
+  for (let index = 1; index < roles.length; index++) {
+    if (roles[index] === roles[index - 1]) {
+      alternation = `broken at [${index}]`;
+      break;
+    }
+  }
+
+  return (
+    `roles=[${roles.join(", ")}] tool-call adjacency=${adjacency} ` +
+    `role alternation=${alternation}`
+  );
+}
+
+/**
+ * Add `text` to one turn's own text block, rather than beside it as a second
+ * one. A user turn carrying two text blocks is what the writer formatter
+ * refuses outright ("doesn't support multiple contents"), and every other
+ * formatter reads one joined block the same way it reads two. A turn with no
+ * text block yet gets one.
+ */
+function mergeTextInto(
+  message: unknown,
+  text: string,
+  placement: "prepend" | "append",
+): PlacedUserText {
+  const content = (message as { content?: unknown }).content as unknown[];
+  const blockIndex =
+    placement === "prepend"
+      ? content.findIndex(isTextBlock)
+      : content.findLastIndex(isTextBlock);
+  if (blockIndex >= 0) {
+    const original = content[blockIndex];
+    const existing = (original as { text: string }).text;
+    const inserted = new TextBlock(
+      placement === "prepend"
+        ? `${text}\n\n${existing}`
+        : `${existing}\n\n${text}`,
+    );
+    content[blockIndex] = inserted;
+    return { kind: "replace", content, index: blockIndex, original, inserted };
+  }
+  const inserted = new TextBlock(text);
+  if (placement === "prepend") content.unshift(inserted);
+  else content.push(inserted);
+  return { kind: "splice", content, inserted };
+}
+
+/**
+ * Add `text` to `messages` as the model will read it, without breaking either
+ * rule `describeModelBoundHistory` reports on.
+ *
+ * There is exactly one safe placement once the history's tail answers a tool
+ * call, and it is not the obvious one. Folding the text into the tool-result
+ * turn breaks adjacency for the splitting formatters; giving it a user turn of
+ * its own after that turn breaks alternation for the one-to-one formatters.
+ * Both remaining directions add a turn next to an existing user turn, which
+ * breaks alternation again. So the text merges into the latest user turn that
+ * carries no tool result: the question. That leaves the message count, and
+ * therefore the bound role sequence, exactly as it was.
+ *
+ * `placement` says where inside that turn the text goes. Application context
+ * is a preamble to the question and prepends; a synthesized note about what
+ * the tools returned is a postscript and appends.
+ *
+ * When the history holds no question at all (a delta payload that replayed
+ * only tool results, or a history with no user turn), the text becomes a user
+ * turn of its own: appended when there is no user turn to sit beside, and
+ * otherwise opening the history, which is where a provider expects a user turn
+ * that no assistant turn has answered yet.
+ *
+ * Returns the record needed to undo the placement, or `undefined` when
+ * `messages` is not a list to place into.
+ */
+export function placeUserText(
+  messages: unknown,
+  text: string,
+  placement: "prepend" | "append",
+): PlacedUserText | undefined {
+  if (!Array.isArray(messages)) return undefined;
+
+  const questionIndex = latestQuestionIndexIn(messages);
+  if (questionIndex >= 0) {
+    return mergeTextInto(messages[questionIndex], text, placement);
+  }
+
+  const added = new StrandsMessage({
+    role: "user",
+    content: [new TextBlock(text)],
+  });
+  const hasUserTurn = messages.some(
+    (message) => (message as { role?: unknown })?.role === "user",
+  );
+  const index = hasUserTurn ? 0 : messages.length;
+  messages.splice(index, 0, added);
+  return { kind: "insert", messages, index, inserted: added };
+}
+
+/**
+ * Place the run's context block in front of the model, mirroring Python's
+ * `_TransientModelContextHook._before_model_call` case for case. The placement
+ * is `placeUserText`, so the block lands where no provider formatter refuses
+ * it, and it is undone afterwards so the durable conversation is untouched.
  */
 function injectModelContext(event: BeforeModelCallEvent): void {
   const contextBlock = modelContextBlock.getStore();
@@ -220,48 +406,8 @@ function injectModelContext(event: BeforeModelCallEvent): void {
     // prevent, so it fails loudly instead. Same message as Python.
     throw new Error("Transient AG-UI model context was not restored");
   }
-  const messages = agent.messages;
-  if (!Array.isArray(messages)) return;
-
-  let latestUserIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if ((messages[index] as { role?: unknown } | undefined)?.role === "user") {
-      latestUserIndex = index;
-      break;
-    }
-  }
-  const contextMessage = new StrandsMessage({
-    role: "user",
-    content: [new TextBlock(contextBlock)],
-  });
-
-  if (latestUserIndex < 0) {
-    messages.push(contextMessage);
-    mutations.set(agent, {
-      kind: "insert",
-      messages,
-      index: messages.length - 1,
-      inserted: contextMessage,
-    });
-    return;
-  }
-
-  const latestUser = messages[latestUserIndex] as { content?: unknown };
-  const content = latestUser.content;
-  if (Array.isArray(content) && content.some(isToolResultBlock)) {
-    const inserted = new TextBlock(contextBlock);
-    content.unshift(inserted);
-    mutations.set(agent, { kind: "prepend", content, inserted });
-    return;
-  }
-
-  messages.splice(latestUserIndex, 0, contextMessage);
-  mutations.set(agent, {
-    kind: "insert",
-    messages,
-    index: latestUserIndex,
-    inserted: contextMessage,
-  });
+  const placed = placeUserText(agent.messages, contextBlock, "prepend");
+  if (placed) mutations.set(agent, [placed]);
 }
 
 /** Remove `target` from `list` by identity, trying `hint` first. */
@@ -286,10 +432,24 @@ function removeByIdentity(
  */
 export function restoreTransientModelContext(agent: unknown): void {
   if (agent === null || typeof agent !== "object") return;
-  const mutation = mutations.get(agent);
-  if (!mutation) return;
+  const applied = mutations.get(agent);
+  if (!applied) return;
   mutations.delete(agent);
-  if (mutation.kind === "prepend") {
+  for (let index = applied.length - 1; index >= 0; index--) {
+    undoOne(agent, applied[index]!);
+  }
+}
+
+function undoOne(agent: unknown, mutation: PlacedUserText): void {
+  if (mutation.kind === "replace") {
+    const at =
+      mutation.content[mutation.index] === mutation.inserted
+        ? mutation.index
+        : mutation.content.indexOf(mutation.inserted);
+    if (at >= 0) mutation.content[at] = mutation.original;
+    return;
+  }
+  if (mutation.kind === "splice") {
     removeByIdentity(mutation.content, mutation.inserted, 0);
     return;
   }

@@ -46,6 +46,7 @@ import {
   expectDurableRecovery,
   expectNoRunError,
   expectStoreMatchesMemory,
+  expectToolCallsAnsweredImmediately,
   historyTexts,
   IDLE_CHECKPOINT,
   liveCheckpoint,
@@ -53,6 +54,8 @@ import {
   modelSawShape,
   modelSawTexts,
   modelTurn,
+  openAIAdjacency,
+  openAIBoundMessages,
   persistedSnapshot,
   persistedToolResults,
   realStrandsAgent,
@@ -261,6 +264,20 @@ function undecoratePersistedPlaceholder(dir: string, text: string): void {
  */
 function timesSaid(texts: readonly string[], line: string): number {
   return texts.filter((text) => text.includes(line)).length;
+}
+
+/**
+ * Assert the model was told `line` somewhere in the turn's text.
+ *
+ * Not an exact match on one block: what carries the line can be a turn of its
+ * own or, where a provider would refuse that, text merged into another turn.
+ * What matters is that the line was said, once.
+ */
+function expectSaid(texts: readonly string[], line: string): void {
+  expect(
+    timesSaid(texts, line),
+    `model was not told ${JSON.stringify(line)}`,
+  ).toBe(1);
 }
 
 /**
@@ -2066,18 +2083,19 @@ describe("a continuation whose reconcile declines only some results", () => {
                 `toolUse:${TOOL}#${DECLINED_ID}`,
               ],
             },
-            // The prompt travels inside the trailing `toolResult` turn rather
-            // than after it, because two consecutive user turns are a shape no
-            // provider accepts. The turn goes out reshaped, so it persists that
-            // way too.
             {
               role: "user",
               blocks: [
                 `toolResult:#${NATIVE_ID}`,
                 `toolResult:#${DECLINED_ID}`,
-                `text:${DECLINED_LINE}`,
               ],
             },
+            // Its own turn, and durable. Text inside the turn above would bind
+            // as assistant(tool_calls) -> user(text) -> tool(result), which
+            // OpenAI refuses; a turn after it is two consecutive user messages,
+            // which is what every path through this adapter produces and what
+            // the store has to keep to stay faithful to what the client sent.
+            { role: "user", blocks: [`text:${DECLINED_LINE}`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
           toolResults: [
@@ -2471,16 +2489,10 @@ describe("a reconcile whose snapshot write the store refuses", () => {
           messages: [
             { role: "user", blocks: ["text:make it red"] },
             { role: "assistant", blocks: [`toolUse:${TOOL}#${NATIVE_ID}`] },
-            // One user turn, carrying both: the prompt travels inside the
-            // trailing `toolResult` turn rather than after it, because two
-            // consecutive user turns are a shape no provider accepts.
-            {
-              role: "user",
-              blocks: [
-                `toolResult:#${NATIVE_ID}`,
-                `text:${TOOL} returned: color applied`,
-              ],
-            },
+            { role: "user", blocks: [`toolResult:#${NATIVE_ID}`] },
+            // Its own turn; see the partial-decline case above for why it is
+            // not inside the one that answers the call.
+            { role: "user", blocks: [`text:${TOOL} returned: color applied`] },
             { role: "assistant", blocks: ["text:The color is now red."] },
           ],
           // The stub and its call id both survive, so a later run can still
@@ -3179,5 +3191,161 @@ describe("a proxy left over from an earlier turn", () => {
 
     expect(native.calls).toHaveLength(1);
     expect(resultContents(events)).toEqual([JSON.stringify({ ran: TOOL })]);
+  });
+});
+
+/**
+ * A continuation whose payload holds a tool result and the user's next question
+ * has to leave the store holding what the client actually sent.
+ *
+ * The temptation is to reshape the conversation on the way in, so the trailing
+ * turn stops being a second consecutive user message. Anything that edits the
+ * history before the run is silently lossy: Python's session manager writes a
+ * message when it is added and never rewrites an older one, so an edit to the
+ * question is an edit the store never sees, and the client's own question is
+ * gone on reload. Nothing here reshapes; the tool call still has to be answered
+ * with nothing in between, which is the rule that has teeth. The TypeScript
+ * half of the Python suite's `TestATurnCarryingBothAnAnswerAndAQuestion`.
+ */
+describe("a turn carrying both an answer and a question", () => {
+  /** The payload that carries a tool result and the user's next turn. */
+  function answerAndQuestion(
+    runId: string,
+    questions: string[],
+  ): RunAgentInput {
+    return minimalRunInput({
+      runId,
+      messages: [
+        { id: "u1", role: "user", content: "make it red" } as never,
+        {
+          id: "t1",
+          role: "tool",
+          toolCallId: NATIVE_ID,
+          content: "color applied",
+        } as never,
+        ...questions.map(
+          (text, index) =>
+            ({ id: `u${index + 2}`, role: "user", content: text }) as never,
+        ),
+      ],
+      tools: CLIENT_TOOLS,
+    });
+  }
+
+  /** The persisted conversation as `role: joined text`, in order. */
+  function storedTurns(dir: string): string[] {
+    return persistedSnapshot(dir).data.messages.map((message) => {
+      const record = message as { role?: string; content?: unknown[] };
+      const text = (record.content ?? [])
+        .flatMap((block) => {
+          const value = (block as { text?: unknown }).text;
+          return typeof value === "string" ? [value] : [];
+        })
+        .join("");
+      return `${record.role}: ${text}`;
+    });
+  }
+
+  it("keeps both as their own messages across a restart", async () => {
+    const dir = storageDir();
+    const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
+    expectNoRunError(await collect(first.agent, firstRun()), "first run");
+
+    const second = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        second.agent,
+        answerAndQuestion("run-2", ["now make it blue"]),
+      ),
+      "the answer-and-question turn",
+    );
+
+    expectSaid(modelSawTexts(second.model, 0), "now make it blue");
+    expectToolCallsAnsweredImmediately(second.model.seenMessages[0]!);
+
+    // The store is read back on its own terms. The client's question is there,
+    // it is still its own message, and it is still after the answer it
+    // followed.
+    expect(storedTurns(dir)).toEqual([
+      "user: make it red",
+      "assistant: ",
+      "user: ",
+      "user: now make it blue",
+      "assistant: The color is now red.",
+    ]);
+  });
+
+  it("puts the question after the answer in the provider's own request", async () => {
+    const dir = storageDir();
+    const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
+    expectNoRunError(await collect(first.agent, firstRun()), "first run");
+
+    const second = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        second.agent,
+        answerAndQuestion("run-2", ["now make it blue"]),
+      ),
+      "the answer-and-question turn",
+    );
+
+    // Through the real Chat Completions formatter, not a description of it.
+    const bound = await openAIBoundMessages(second.model.seenMessages[0]!);
+    expect(openAIAdjacency(bound)).toBe("ok");
+
+    // Chronological: the tool's answer, and only then the new question. A
+    // bridge that folded the question into an earlier turn would leave the
+    // tool message last and have the model answer the question it already
+    // answered.
+    expect(bound.map((message) => message.role).slice(-2)).toEqual([
+      "tool",
+      "user",
+    ]);
+    const last = bound[bound.length - 1]!;
+    expect(JSON.stringify(last)).toContain("now make it blue");
+  });
+
+  it("keeps the question in place when a later turn follows the restart", async () => {
+    const dir = storageDir();
+    const first = bootProcess(dir, CALLS_FRONTEND_TOOL);
+    expectNoRunError(await collect(first.agent, firstRun()), "first run");
+
+    const second = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        second.agent,
+        answerAndQuestion("run-2", ["now make it blue"]),
+      ),
+      "the answer-and-question turn",
+    );
+
+    // A third process, reading the thread back off disk and carrying on.
+    const third = bootProcess(dir, ANSWERS);
+    expectNoRunError(
+      await collect(
+        third.agent,
+        answerAndQuestion("run-3", ["now make it blue", "and now green"]),
+      ),
+      "the turn after the restart",
+    );
+
+    expect(storedTurns(dir)).toEqual([
+      "user: make it red",
+      "assistant: ",
+      "user: ",
+      "user: now make it blue",
+      "assistant: The color is now red.",
+      "user: and now green",
+      "assistant: The color is now red.",
+    ]);
+
+    // What the later model call read matches the order the store holds.
+    expect(modelSawTexts(third.model, 0)).toEqual([
+      "make it red",
+      "color applied",
+      "now make it blue",
+      "The color is now red.",
+      "and now green",
+    ]);
   });
 });

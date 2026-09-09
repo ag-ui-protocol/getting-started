@@ -73,10 +73,14 @@ import {
   A2UI_STREAM_KEY,
 } from "./a2ui-tool";
 import {
+  describeModelBoundHistory,
   ensureTransientContextHook,
   formatAguiContext,
   installOrchestratorContextHooks,
+  isToolResultBlock,
+  latestQuestionIndex,
   normalizeAguiContext,
+  placeUserText,
   pullWithModelContext,
   restoreOrchestratorContext,
   restoreTransientModelContext,
@@ -3794,57 +3798,15 @@ export class StrandsAgent {
         }
       }
 
-      // Replay disabled, cold agent, continuation run: the seed already ends
-      // with the user-role toolResult turn, so handing the synthetic
-      // continuation prompt to `stream()` would have Strands append a SECOND
-      // user message. The provider-bound roles become user -> assistant ->
-      // user -> user, which Bedrock refuses for failing role alternation.
-      // Folding the prompt into the turn that is already there keeps the
-      // continuation as one user turn carrying both the toolResult block and
-      // the prompt. Only reached on the opt-out; the documented default
-      // returns above with `invokeArgs = undefined`.
-      if (
-        !replayHistory &&
-        !resumeSubmitted &&
-        typeof invokeArgs === "string"
-      ) {
-        const seeded = (strandsAgent as { messages?: unknown[] }).messages;
-        const tail = seeded?.[seeded.length - 1] as
-          | { role?: string; content?: unknown[] }
-          | undefined;
-        const tailCarriesToolResult =
-          tail?.role === "user" &&
-          Array.isArray(tail.content) &&
-          tail.content.some((b) => {
-            // Seeded history arrives as ContentBlock INSTANCES, which carry a
-            // `type` discriminant; the plain-object form carries the key
-            // itself. Both shapes reach here depending on the path.
-            const block = b as { toolResult?: unknown; type?: string };
-            return (
-              block?.toolResult !== undefined ||
-              block?.type === "toolResultBlock"
-            );
-          });
-        if (tailCarriesToolResult) {
-          // Rebuilt from the serialized form so the appended text block is a
-          // real instance like the ones already there; Bedrock's formatter
-          // dispatches on `block.type`, which only instances carry.
-          const tailData = (
-            tail as unknown as { toJSON?: () => { content?: unknown[] } }
-          ).toJSON?.() ?? { content: tail!.content };
-          (strandsAgent as { messages: unknown[] }).messages = [
-            ...seeded!.slice(0, -1),
-            StrandsMessage.fromMessageData({
-              role: "user",
-              content: [
-                ...((tailData.content ?? []) as never[]),
-                { text: invokeArgs } as never,
-              ] as never,
-            }),
-          ];
-          invokeArgs = undefined;
-        }
-      }
+      // Nothing reshapes the history here. The prompt goes to `stream()` and
+      // Strands appends it as its own user turn, which is what the session
+      // store records and what the client sent. When the history it lands on
+      // already ends on the turn that answers the tool call, that is two
+      // consecutive user messages, which is what every other path through this
+      // adapter has always produced and is left alone here. What is NOT left
+      // alone is text inside the turn that answers the tool call: that binds as
+      // assistant(tool_calls) -> user(text) -> tool(result) and OpenAI refuses
+      // it outright. See `model-context.ts`.
 
       // Native ids already in this thread's history, captured after any history
       // replacement above and before the stream appends this run's own calls.

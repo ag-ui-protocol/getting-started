@@ -70,6 +70,15 @@ function blockOf(...lines: string[]): string {
   return `${HEADER}\n${lines.join("\n")}`;
 }
 
+/**
+ * The block merged into the question, which is how the model reads it: one
+ * text block, because a user turn carrying two is what the writer formatter
+ * refuses outright.
+ */
+function blockBefore(question: string, ...lines: string[]): string {
+  return `${blockOf(...lines)}\n\n${question}`;
+}
+
 type ContextEntry = RunAgentInput["context"][number];
 
 /** One user turn plus the given context, the shape every case starts from. */
@@ -158,7 +167,7 @@ describe("model context block rendering", () => {
 });
 
 describe("context forwarding to the model", () => {
-  it("shows the context to the model immediately before the latest user turn and excludes the A2UI schema entry", async () => {
+  it("merges the context into the latest user turn and excludes the A2UI schema entry", async () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("ok")]);
     const lookalike = "A2UI Component Schema for customer preferences";
 
@@ -173,11 +182,12 @@ describe("context forwarding to the model", () => {
 
     expectCompletedRun(events);
     expect(modelSawTexts(model, 0)).toEqual([
-      blockOf(`- ${lookalike}: keep me`, "- user_id: u-42"),
-      "hello",
+      blockBefore("hello", `- ${lookalike}: keep me`, "- user_id: u-42"),
     ]);
+    // One turn and one text block. A turn of its own would be a second user
+    // turn beside the question, which the one-to-one formatters reject, and a
+    // second text block inside the turn is what the writer formatter refuses.
     expect(modelSawShape(model, 0)).toEqual([
-      { role: "user", blocks: ["textBlock"] },
       { role: "user", blocks: ["textBlock"] },
     ]);
     // The block was for the model only: the durable history holds the turn
@@ -210,8 +220,7 @@ describe("context forwarding to the model", () => {
 
     expectCompletedRun(events);
     expect(modelSawTexts(model, 0)).toEqual([
-      blockOf("- account: premium"),
-      "hello",
+      blockBefore("hello", "- account: premium"),
     ]);
     expect(historyTexts(threadAgent(agent)!.messages)).toEqual(["hello", "ok"]);
   });
@@ -239,12 +248,10 @@ describe("context forwarding to the model", () => {
 
     expectCompletedRun(events);
     expect(modelSawShape(model, 0)).toEqual([
-      { role: "user", blocks: ["textBlock"] },
       { role: "user", blocks: ["textBlock", "imageBlock"] },
     ]);
     expect(modelSawTexts(model, 0)).toEqual([
-      blockOf("- locale: nl-NL"),
-      "hello",
+      blockBefore("hello", "- locale: nl-NL"),
     ]);
     expect(historyShape(threadAgent(agent)!.messages)).toEqual([
       { role: "user", blocks: ["textBlock", "imageBlock"] },
@@ -271,7 +278,7 @@ describe("context forwarding to the model", () => {
     ]);
   });
 
-  it("follows stale history but keeps the latest user turn byte-identical", async () => {
+  it("follows stale history by riding in the latest user turn", async () => {
     const { agent, model } = realStrandsAgent([modelTurn.text("ok")]);
 
     const events = await collect(
@@ -289,19 +296,23 @@ describe("context forwarding to the model", () => {
     expect(modelSawTexts(model, 0)).toEqual([
       "selected invoice 456",
       "noted",
-      blockOf("- selected invoice: 123"),
-      "which invoice is selected?",
+      blockBefore("which invoice is selected?", "- selected invoice: 123"),
     ]);
-    // The turn the model routed on is the turn the client sent, unchanged.
-    // Read from the model-call-time copy: the live array has since grown by
-    // the answer. Only the role and the content are compared, because that is
-    // all a provider is sent; the SDK is free to add bookkeeping fields to a
-    // serialized message and does across releases.
+    // Live UI context lands next to the question it belongs to, inside that
+    // turn rather than as a turn of its own. Read from the model-call-time
+    // copy: the live array has since grown by the answer. Only the role and
+    // the content are compared, because that is all a provider is sent; the
+    // SDK is free to add bookkeeping fields to a serialized message and does
+    // across releases.
     const seen = model.seenMessages[0]!;
+    expect(seen.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
     const latest = seen[seen.length - 1]!;
-    expect(latest.role).toBe("user");
     expect(latest.toJSON().content).toEqual([
-      { text: "which invoice is selected?" },
+      { text: blockBefore("which invoice is selected?", "- selected invoice: 123") },
     ]);
     expect(historyTexts(threadAgent(agent)!.messages)).toEqual([
       "selected invoice 456",
@@ -311,7 +322,7 @@ describe("context forwarding to the model", () => {
     ]);
   });
 
-  it("rides inside the latest user turn when that turn carries a tool result", async () => {
+  it("stays out of a user turn that carries a tool result", async () => {
     const lookup = tool({
       name: "lookup",
       description: "d",
@@ -332,20 +343,22 @@ describe("context forwarding to the model", () => {
     );
 
     expectCompletedRun(events);
-    // First call: the usual separate turn before the question.
+    // First call: merged into the question, which is the only user turn.
     expect(modelSawShape(model, 0)).toEqual([
       { role: "user", blocks: ["textBlock"] },
-      { role: "user", blocks: ["textBlock"] },
     ]);
-    // Second call: the latest user turn is the tool result, and a user
-    // message between a toolUse and its toolResult is a shape providers
-    // reject, so the block is prepended into that same turn instead.
+    // Second call: the latest user turn is the tool result. The block goes to
+    // the question instead, because a turn carrying both text and a tool
+    // result binds as assistant(tool_calls) -> user(text) -> tool(result) on
+    // every splitting formatter, which OpenAI answers with a 400.
     expect(modelSawShape(model, 1)).toEqual([
       { role: "user", blocks: ["textBlock"] },
       { role: "assistant", blocks: ["toolUseBlock"] },
-      { role: "user", blocks: ["textBlock", "toolResultBlock"] },
+      { role: "user", blocks: ["toolResultBlock"] },
     ]);
-    expect(modelSawTexts(model, 1)[1]).toBe(blockOf("- selected invoice: 123"));
+    expect(modelSawTexts(model, 1)[0]).toBe(
+      blockBefore("hello", "- selected invoice: 123"),
+    );
     // Withdrawn again: the durable tool-result turn is only the tool result.
     expect(historyShape(threadAgent(agent)!.messages)).toEqual([
       { role: "user", blocks: ["textBlock"] },
@@ -396,11 +409,10 @@ describe("context forwarding to the model", () => {
     expect(model.seenMessages).toHaveLength(2);
     for (const seen of model.seenMessages) {
       const texts = historyTexts(seen);
-      expect(texts).toHaveLength(2);
-      const which = texts[1]!.endsWith("A") ? "A" : "B";
+      expect(texts).toHaveLength(1);
+      const which = texts[0]!.endsWith("A") ? "A" : "B";
       expect(texts).toEqual([
-        blockOf(`- thread: ${which}`),
-        `question ${which}`,
+        blockBefore(`question ${which}`, `- thread: ${which}`),
       ]);
     }
   });
@@ -552,8 +564,7 @@ describe("context forwarding through an orchestrator", () => {
 
     expectCompletedRun(events);
     expect(modelSawTexts(model, 0)).toEqual([
-      blockOf("- selected invoice: 123"),
-      "which invoice?",
+      blockBefore("which invoice?", "- selected invoice: 123"),
     ]);
     expect(JSON.stringify(leaf.messages)).not.toContain(HEADER);
   });
@@ -646,8 +657,7 @@ describe("A2UI render-guide exclusion", () => {
 
     expectCompletedRun(events);
     expect(modelSawTexts(model, 0)).toEqual([
-      blockOf("- user_id: u-42"),
-      "hello",
+      blockBefore("hello", "- user_id: u-42"),
     ]);
   });
 
@@ -664,8 +674,7 @@ describe("A2UI render-guide exclusion", () => {
 
     expectCompletedRun(events);
     expect(modelSawTexts(model, 0)).toEqual([
-      blockOf(`- ${renderGuide}: live guide`, "- user_id: u-42"),
-      "hello",
+      blockBefore("hello", `- ${renderGuide}: live guide`, "- user_id: u-42"),
     ]);
   });
 });

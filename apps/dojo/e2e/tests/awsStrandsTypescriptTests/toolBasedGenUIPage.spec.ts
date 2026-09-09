@@ -30,8 +30,11 @@ test("[StrandsTS] Haiku generation and UI consistency for two different prompts"
   await genAIAgent.checkGeneratedHaiku();
   await genAIAgent.checkHaikuDisplay(page);
 
+  const afterFirst = await genAIAgent.snapshotHaiku(page);
+
   const prompt2 = 'Generate Haiku for "The moon shines bright"';
   await genAIAgent.generateHaiku(prompt2);
+  await genAIAgent.checkLaterHaikuArrived(page, afterFirst);
   await genAIAgent.checkGeneratedHaiku();
   await genAIAgent.checkHaikuDisplay(page);
 });

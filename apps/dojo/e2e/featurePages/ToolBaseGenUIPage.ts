@@ -42,6 +42,78 @@ export class ToolBaseGenUIPage {
     ).toBeVisible();
   }
 
+  /** Every haiku card's joined lines, in DOM order, chat and carousel alike. */
+  async haikuContents(page: Page): Promise<string[]> {
+    const cards = page.locator('[data-testid="haiku-card"]');
+    const count = await cards.count();
+    const contents: string[] = [];
+
+    for (let index = 0; index < count; index++) {
+      const lines = cards
+        .nth(index)
+        .locator('[data-testid="haiku-japanese-line"]');
+      const lineCount = await lines.count();
+      const cardLines: string[] = [];
+      for (let line = 0; line < lineCount; line++) {
+        cardLines.push(await lines.nth(line).innerText());
+      }
+      contents.push(cardLines.join("").replace(/\s/g, ""));
+    }
+    return contents;
+  }
+
+  /**
+   * What the page shows right now: how many haiku cards exist, and what each
+   * one says. Taken between two prompts so the next turn has something to be
+   * different FROM.
+   */
+  async snapshotHaiku(page: Page): Promise<{
+    cards: number;
+    contents: string[];
+  }> {
+    const contents = await this.haikuContents(page);
+    return { cards: contents.length, contents };
+  }
+
+  /**
+   * Assert a LATER prompt actually produced its own haiku.
+   *
+   * Without this, a second turn that rendered nothing still passes the rest of
+   * the suite: `checkGeneratedHaiku` and `checkHaikuDisplay` both read the
+   * newest card and poll the whole carousel, so the first turn's DOM satisfies
+   * them on its own. Two things have to change for the turn to have landed.
+   *
+   * A card has to ARRIVE: asserted as an increase rather than a difference,
+   * because a count that dropped would satisfy "different" while meaning the
+   * opposite. No exact target, since one haiku paints both an in-chat card and
+   * a carousel entry.
+   *
+   * And some card has to say something NEW. A bridge that reshaped the
+   * conversation so the model answered the earlier prompt again would add a
+   * card repeating the haiku already on screen, which the count alone cannot
+   * tell from real progress. Asked of the whole page rather than of the newest
+   * card, because the newest card in DOM order can be a carousel entry for an
+   * earlier haiku.
+   */
+  async checkLaterHaikuArrived(
+    page: Page,
+    previous: { cards: number; contents: string[] },
+  ): Promise<void> {
+    await expect
+      .poll(() => this.haikuBlock.count(), { timeout: 30_000 })
+      .toBeGreaterThan(previous.cards);
+
+    await expect
+      .poll(
+        async () =>
+          (await this.haikuContents(page)).filter(
+            (content) => content && !previous.contents.includes(content),
+          ).length,
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
+  }
+
   async extractChatHaikuContent(page: Page): Promise<string> {
     const allHaikuCards = page.locator('[data-testid="haiku-card"]');
     await expect(allHaikuCards.first()).toBeVisible();
