@@ -1,14 +1,7 @@
 import { AbstractAgent } from "../agent";
 import { HttpAgent } from "../http";
 import { AgentSubscriber } from "../subscriber";
-import {
-  BaseEvent,
-  Message,
-  RunAgentInput,
-  State,
-  ToolCall,
-  AssistantMessage,
-} from "@ag-ui/core";
+import { BaseEvent, Message, RunAgentInput, State, ToolCall, AssistantMessage } from "@ag-ui/core";
 import { Observable, of } from "rxjs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -614,5 +607,43 @@ describe("the terminal HTTP egress strips null tags from every later writer", ()
     await agent.runAgent({}, subscriber);
     expect(sentBody).toBeDefined();
     expect(sentBody).not.toContain('"subagentRunId":null');
+  });
+
+  it("an onRunInitialized mutation cannot put an activity message on the wire", async () => {
+    // prepareRunAgentInput drops activity messages -- they are the consumer's
+    // own display state, not conversation the producer owns. A subscriber that
+    // REPLACES the message list lands after that filter, so it has to be
+    // re-applied here the way the null-tag sanitisation already is.
+    let sentBody: string | undefined;
+    class CaptureHttpAgent extends HttpAgent {
+      run(input: RunAgentInput): Observable<BaseEvent> {
+        sentBody = this.requestInit(input).body as string;
+        return of(
+          { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+          { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+        ) as unknown as Observable<BaseEvent>;
+      }
+    }
+    const agent = new CaptureHttpAgent({ url: "http://localhost/agent" });
+    const subscriber: AgentSubscriber = {
+      onRunInitialized: () => ({
+        messages: [
+          { id: "m1", role: "user", content: "hello" },
+          {
+            id: "act-1",
+            role: "activity",
+            activityType: "PLAN",
+            content: { tasks: ["one"] },
+          },
+        ] as unknown as Message[],
+      }),
+    };
+
+    await agent.runAgent({}, subscriber);
+    expect(sentBody).toBeDefined();
+    expect(sentBody).not.toContain('"activity"');
+    expect(sentBody).toContain('"m1"');
+    // The agent still HOLDS it: only the wire copy is filtered.
+    expect(agent.messages.some((message) => message.role === "activity")).toBe(true);
   });
 });

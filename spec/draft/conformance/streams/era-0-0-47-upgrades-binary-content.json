@@ -1,0 +1,90 @@
+{
+  "name": "era-0-0-47-upgrades-binary-content",
+  "area": "compatibility",
+  "description": "a legacy binary content part is upgraded to a typed media part before it reaches the agent",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove the {type:binary} upgrade from BackwardCompatibility_0_0_47. NOT the version gate: this fixture pins an eligible peer, so making the shim unconditional changes nothing here \u2014 the gate is killed by era-current-peer-keeps-modern-content instead",
+  "client": {
+    "maxProtocolVersion": "0.0.47"
+  },
+  "input": {
+    "messages": [
+      {
+        "id": "era47-u1",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Describe it."
+          },
+          {
+            "type": "binary",
+            "mimeType": "image/png",
+            "url": "https://example.com/legacy.png"
+          }
+        ]
+      }
+    ]
+  },
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-era47",
+      "runId": "r-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "era47-m1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "era47-m1",
+      "delta": "Legacy."
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "era47-m1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-era47",
+      "runId": "r-1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "request": {
+      "messages": [
+        {
+          "id": "era47-u1",
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Describe it."
+            },
+            {
+              "type": "image",
+              "source": {
+                "type": "url",
+                "value": "https://example.com/legacy.png",
+                "mimeType": "image/png"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The compatibility shims are TypeScript client middleware and the .NET client has no equivalent \u2014 but it does not forward the legacy part either. AGUIMessageJsonConverter's input-content union is closed, so a {\"type\":\"binary\"} part throws \"Unknown InputContent type: 'binary'\" while the run input is being deserialized; this lane's BuildInput catches that per message and starts the run without it, so the WHOLE message \u2014 its conformant text part included \u2014 never reaches the agent. Neither upgraded nor forwarded: dropped. The empty messages list below is what pins that, in place of the `{}` that used to match any request at all. Alignment is tracked separately.",
+      "request": {
+        "threadId": "t-era47",
+        "runId": "r-1",
+        "messages": []
+      }
+    }
+  }
+}

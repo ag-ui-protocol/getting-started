@@ -27,10 +27,17 @@
     "link:global": "pnpm link --global",
     "unlink:global": "pnpm unlink --global"
   },
-  "dependencies": {
-    "zod": "^3.22.4"
+  "peerDependencies": {
+    "zod": "^3.25.18 || ^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "zod": "^3.25.76",
+    "esbuild": "^0.25.0",
     "@vitest/coverage-istanbul": "^4.0.18",
     "eslint": "^9.37.0",
     "publint": "^0.3.12",
@@ -39,11 +46,32 @@
     "tsdown": "^0.20.1",
     "typescript": "^5.8.2"
   },
+  "typesVersions": {
+    "*": {
+      "schemas": [
+        "./dist/schemas.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "require": "./dist/index.js",
       "import": "./dist/index.mjs"
     },
+    "./schemas": {
+      "require": "./dist/schemas.js",
+      "import": "./dist/schemas.mjs"
+    },
     "./package.json": "./package.json"
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "cache": false
+      },
+      "test:coverage": {
+        "cache": false
+      }
+    }
   }
 }

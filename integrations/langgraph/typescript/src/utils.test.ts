@@ -8,7 +8,7 @@ import {
   Message,
   UserMessage,
   TextInputContent,
-  BinaryInputContent,
+  InputContent,
   ImageInputContent,
   AudioInputContent,
   VideoInputContent,
@@ -22,6 +22,33 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage } from "@langchain/core/messages";
 import { aguiMessagesToLangChain, langchainMessagesToAgui, resolveReasoningContent } from "./utils";
+
+// The legacy binary part left @ag-ui/core in 1.0; this boundary still reads
+// it (see utils.ts), so the tests type it locally.
+//
+// Hence the `as LegacyBinaryInputContent as unknown as InputContent` on the fixtures
+// below, which is two different things in one line.
+//
+// `as unknown as InputContent` is the half the compiler requires: 1.0's
+// InputContent union has no `binary` member, so a direct cast is an error and
+// TypeScript's own advice is to launder through `unknown`. On its own it would
+// build — `{}` would too, which is the point of the other half.
+//
+// `as LegacyBinaryInputContent` names what the literal is SUPPOSED to be, so a typo'd
+// `mimetype` or a numeric `mimeType` fails to compile instead of quietly
+// becoming a free-form object. Today every test here also pins its own output
+// tightly enough to catch that, so this half is a guard rail rather than a
+// load-bearing check — keep it when adding a fixture whose assertion is only
+// that the part was DROPPED, where a malformed literal would be dropped too and
+// the test would pass for the wrong reason.
+interface LegacyBinaryInputContent {
+  type: "binary";
+  mimeType: string;
+  id?: string;
+  url?: string;
+  data?: string;
+  filename?: string;
+}
 
 describe("Multimodal Message Conversion", () => {
   describe("aguiMessagesToLangChain", () => {
@@ -251,7 +278,7 @@ describe("Multimodal Message Conversion", () => {
             mimeType: "application/pdf",
             url: "https://example.com/legacy.pdf",
             filename: "legacy.pdf",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -435,7 +462,7 @@ describe("Multimodal Message Conversion", () => {
               mimeType: "application/pdf",
               data: "JVBERi0xLjQK",
               filename: "",
-            } as BinaryInputContent,
+            } as LegacyBinaryInputContent as unknown as InputContent,
           ],
         } as UserMessage,
       ])[0].content as Array<any>;
@@ -483,7 +510,7 @@ describe("Multimodal Message Conversion", () => {
     });
 
     it("should send a legacy binary PDF as a file block", () => {
-      // `BinaryInputContent` is deprecated but still accepted, and a deprecated
+      // `LegacyBinaryInputContent` is deprecated but still accepted, and a deprecated
       // path that 400s is not meaningfully more supported than one that raises.
       const aguiMessage: UserMessage = {
         id: "test-binary-pdf",
@@ -495,7 +522,7 @@ describe("Multimodal Message Conversion", () => {
             mimeType: "application/pdf",
             data: "JVBERi0xLjQK",
             filename: "legacy-invoice.pdf",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -511,7 +538,7 @@ describe("Multimodal Message Conversion", () => {
       });
     });
 
-    it("should handle BinaryInputContent for backwards compatibility", () => {
+    it("should handle LegacyBinaryInputContent for backwards compatibility", () => {
       const aguiMessage: UserMessage = {
         id: "test-binary-compat",
         role: "user",
@@ -521,7 +548,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/jpeg",
             url: "https://example.com/photo.jpg",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -534,7 +561,7 @@ describe("Multimodal Message Conversion", () => {
       expect(content[1].image_url.url).toBe("https://example.com/photo.jpg");
     });
 
-    it("should handle BinaryInputContent with base64 data for backwards compat", () => {
+    it("should handle LegacyBinaryInputContent with base64 data for backwards compat", () => {
       const aguiMessage: UserMessage = {
         id: "test-binary-data",
         role: "user",
@@ -543,7 +570,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/png",
             data: "iVBORw0KGgoAAAANSUhEUgAAAAUA",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -623,7 +650,7 @@ describe("Multimodal Message Conversion", () => {
         type: "binary",
         mimeType: "video/mp4",
         data: "SGVsbG8=",
-      } as BinaryInputContent);
+      } as LegacyBinaryInputContent);
 
       expect(wire).toEqual({
         type: "image_url",
@@ -797,7 +824,7 @@ describe("Multimodal Message Conversion", () => {
       expect((lcMessages[0].content as Array<any>)).toHaveLength(0);
     });
 
-    it("should handle BinaryInputContent with only id for backwards compat", () => {
+    it("should handle LegacyBinaryInputContent with only id for backwards compat", () => {
       const aguiMessage: UserMessage = {
         id: "test-8",
         role: "user",
@@ -806,7 +833,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/jpeg",
             id: "img-123",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -858,7 +885,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "image/jpeg",
             // No url, data, or id
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -1962,7 +1989,7 @@ describe("Multimodal Message Conversion", () => {
             mimeType: "application/pdf",
             data: "JVBERi0xLjQK",
             filename: "legacy-invoice.pdf",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -1987,7 +2014,7 @@ describe("Multimodal Message Conversion", () => {
             type: "binary",
             mimeType: "audio/wav",
             data: "SGVsbG8=",
-          } as BinaryInputContent,
+          } as LegacyBinaryInputContent as unknown as InputContent,
         ],
       };
 
@@ -2056,7 +2083,7 @@ describe("Multimodal Message Conversion", () => {
       const aguiMessage: UserMessage = {
         id: "boundary-legacy-audio-mime",
         role: "user",
-        content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as BinaryInputContent],
+        content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as LegacyBinaryInputContent as unknown as InputContent],
       };
 
       const emitted = emittedBlocks(aguiMessage);
@@ -2136,7 +2163,7 @@ describe("Multimodal Message Conversion", () => {
         const aguiMessage: UserMessage = {
           id: "boundary-legacy-audio-unsupported",
           role: "user",
-          content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as BinaryInputContent],
+          content: [{ type: "binary", mimeType, data: "SGVsbG8=" } as LegacyBinaryInputContent as unknown as InputContent],
         };
 
         const emitted = emittedBlocks(aguiMessage);

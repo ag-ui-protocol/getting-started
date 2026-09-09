@@ -41,7 +41,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_START,
       messageId: "phase1",
@@ -91,7 +95,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -145,7 +153,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First reasoning message
     events$.next({
@@ -206,7 +218,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First REASONING_MESSAGE_START creates the message
     events$.next({
@@ -272,7 +288,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -319,7 +339,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_CHUNK,
       messageId: "r1",
@@ -353,7 +377,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "tool-call",
@@ -399,7 +427,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "message",
@@ -443,7 +475,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "message",
@@ -489,7 +525,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -544,7 +584,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -588,7 +632,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_START,
       messageId: "phase1",
@@ -639,7 +687,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "tool-call",
@@ -681,7 +733,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "message",
@@ -715,7 +771,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First create a reasoning message
     events$.next({
@@ -779,7 +839,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "message",
@@ -816,7 +880,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_CONTENT,
       messageId: "non-existent",
@@ -857,7 +925,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_END,
       messageId: "non-existent",
@@ -908,7 +980,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "tool-call",
@@ -947,7 +1023,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "message",
@@ -986,7 +1066,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -1036,7 +1120,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -1083,7 +1171,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, [subscriber]);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -1127,7 +1219,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_MESSAGE_START,
       messageId: "r1",
@@ -1195,7 +1291,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     // Try to set encryptedValue on a tool call that exists
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
@@ -1234,7 +1334,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // Start reasoning
     events$.next({
@@ -1323,7 +1427,11 @@ describe("defaultApplyEvents with reasoning events", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.REASONING_ENCRYPTED_VALUE,
       subtype: "message",

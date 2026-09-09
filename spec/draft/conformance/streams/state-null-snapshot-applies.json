@@ -1,0 +1,35 @@
+{
+  "name": "state-null-snapshot-applies",
+  "area": "state",
+  "description": "a STATE_SNAPSHOT of `null` replaces the state too — the companion falsy case, where an `?? {}` fallback would silently restore an object",
+  "specPage": "/spec/draft/events/state",
+  "kill": "coalesce the snapshot on the way in (`state = snapshot ?? {}`) in the STATE_SNAPSHOT branch",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-state-null-snapshot",
+      "runId": "state-null-snapshot-r1"
+    },
+    { "type": "STATE_SNAPSHOT", "snapshot": { "count": 3 } },
+    { "type": "STATE_SNAPSHOT", "snapshot": null },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-state-null-snapshot",
+      "runId": "state-null-snapshot-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STATE_SNAPSHOT",
+      "RUN_FINISHED"
+    ],
+    "noWarnings": true,
+    "state": null,
+    "eventPaths": {
+      "2.snapshot": null
+    }
+  }
+}

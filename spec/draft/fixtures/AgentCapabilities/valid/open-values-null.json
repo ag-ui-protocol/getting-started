@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "name": "Research Assistant",
+    "metadata": {
+      "region": null,
+      "tier": 2
+    }
+  },
+  "custom": {
+    "flag": null,
+    "nested": {
+      "a": null
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "name": "run-error-then-new-run-continues",
+  "area": "lifecycle",
+  "description": "RUN_ERROR does not end the stream: a RUN_STARTED after it begins a new run in the same stream, and everything the second run produces is applied and delivered",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop the RUN_ERROR arm from resetRunState's caller in verifyEvents so a RUN_STARTED after a RUN_ERROR is rejected as nested, or make the reducer's RUN_ERROR case end the stream (a `throwError` after `emitUpdates()`) — either way the second run's message never arrives and `messages`, `eventTypes` and `outcome` fail together",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-run-error-restart",
+      "runId": "run-error-restart-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "RUN_ERROR",
+      "message": "run-error-restart: the first run failed"
+    },
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-run-error-restart",
+      "runId": "run-error-restart-r-2",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "run-error-restart-m-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-error-restart-m-1",
+      "delta": "second run"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "run-error-restart-m-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-run-error-restart",
+      "runId": "run-error-restart-r-2",
+      "outcome": { "type": "success" }
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "RUN_ERROR",
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_END",
+      "RUN_FINISHED"
+    ],
+    "eventPaths": {
+      "2.runId": "run-error-restart-r-2"
+    },
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "run-error-restart-m-1",
+        "role": "assistant",
+        "content": "second run"
+      }
+    ],
+    "runError": "run-error-restart: the first run failed"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET converter forbids any event after RUN_ERROR — its `runError` latch throws for the next event whatever it is, with no RUN_STARTED exemption — where TypeScript resumes on RUN_STARTED and reduces the second run normally. A cross-SDK divergence, recorded here rather than resolved: closing it means giving EventStreamConverter the same reset-on-RUN_STARTED the TypeScript verifier has. The second run therefore never happens on this lane, so `messages`, `messageCount`, `eventTypes` and `eventPaths` are all restated for what it does deliver: the first RUN_STARTED and the RUN_ERROR, and no messages at all.",
+      "outcome": "failed",
+      "errorContains": "The run has already errored with 'RUN_ERROR'",
+      "eventTypes": ["RUN_STARTED", "RUN_ERROR"],
+      "eventPaths": {
+        "0.runId": "run-error-restart-r-1"
+      },
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

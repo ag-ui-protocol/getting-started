@@ -8,6 +8,38 @@ on:
       - "typescript-sdk/**"
       - "integrations/**"
       - "middlewares/**"
+      # `pnpm run test` is `nx run-many -t test`, which includes @ag-ui/spec — but
+      # only once this workflow is triggered, so a change confined to the schema,
+      # a fixture or the harness would otherwise merge without the suite running.
+      - "spec/**"
+      # The spec suite's drift gate also compares the generated Python and C#
+      # files byte for byte, so a hand edit confined to them must trigger it
+      # too; the proto suite additionally decodes the committed .NET byte
+      # fixtures. AGUI.Abstractions is listed whole rather than just its
+      # Generated/ half because reconcile.ts walks the entire directory and the
+      # harness now gates its output, so a hand-written .cs file there can turn
+      # this suite red.
+      - "sdks/python/ag_ui/_generated/**"
+      # ...and the hand-written Python package beside it: the drift gate reads
+      # ag_ui/core/{events,types,capabilities}.py to prove the generated models
+      # are still the only protocol source there, so a hand-written model
+      # returning to that directory has to trigger this workflow.
+      - "sdks/python/ag_ui/core/**"
+      - "sdks/dotnet/src/AGUI.Abstractions/**"
+      - "sdks/dotnet/src/AGUI.Protobuf/Generated/**"
+      - "sdks/dotnet/tests/AGUI.Protobuf.UnitTests/Fixtures/**"
+      # The published schema is a generated file under the same drift gate, and
+      # the docs folder is the one place it can be edited or deleted without
+      # touching spec/ at all.
+      - "docs/spec/**"
+      # create-ag-ui-app's quickstart-docs test reads
+      # docs/quickstart/applications.mdx and asserts every template it offers is
+      # documented there, so a docs-only edit can turn that suite red.
+      - "docs/quickstart/**"
+      # The cross-language fixtures live outside every tree above and are read
+      # at runtime by the spec harness, @ag-ui/core and @ag-ui/encoder, so a
+      # fixture-only change would otherwise run no job at all.
+      - "sdks/fixtures/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -20,6 +52,38 @@ on:
       - "typescript-sdk/**"
       - "integrations/**"
       - "middlewares/**"
+      # `pnpm run test` is `nx run-many -t test`, which includes @ag-ui/spec — but
+      # only once this workflow is triggered, so a change confined to the schema,
+      # a fixture or the harness would otherwise merge without the suite running.
+      - "spec/**"
+      # The spec suite's drift gate also compares the generated Python and C#
+      # files byte for byte, so a hand edit confined to them must trigger it
+      # too; the proto suite additionally decodes the committed .NET byte
+      # fixtures. AGUI.Abstractions is listed whole rather than just its
+      # Generated/ half because reconcile.ts walks the entire directory and the
+      # harness now gates its output, so a hand-written .cs file there can turn
+      # this suite red.
+      - "sdks/python/ag_ui/_generated/**"
+      # ...and the hand-written Python package beside it: the drift gate reads
+      # ag_ui/core/{events,types,capabilities}.py to prove the generated models
+      # are still the only protocol source there, so a hand-written model
+      # returning to that directory has to trigger this workflow.
+      - "sdks/python/ag_ui/core/**"
+      - "sdks/dotnet/src/AGUI.Abstractions/**"
+      - "sdks/dotnet/src/AGUI.Protobuf/Generated/**"
+      - "sdks/dotnet/tests/AGUI.Protobuf.UnitTests/Fixtures/**"
+      # The published schema is a generated file under the same drift gate, and
+      # the docs folder is the one place it can be edited or deleted without
+      # touching spec/ at all.
+      - "docs/spec/**"
+      # create-ag-ui-app's quickstart-docs test reads
+      # docs/quickstart/applications.mdx and asserts every template it offers is
+      # documented there, so a docs-only edit can turn that suite red.
+      - "docs/quickstart/**"
+      # The cross-language fixtures live outside every tree above and are read
+      # at runtime by the spec harness, @ag-ui/core and @ag-ui/encoder, so a
+      # fixture-only change would otherwise run no job at all.
+      - "sdks/fixtures/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -86,6 +150,15 @@ jobs:
 
       - name: Run tests
         run: pnpm run test
+
+      # @ag-ui/core declares zod to consumers as the optional peer
+      # `^3.25.18 || ^4.0.0` (the ^3.25.76 in devDependencies is only what this
+      # repository builds against), and all its runtime code uses the zod/v4
+      # subpath API, which both supported majors ship. The matrix packs
+      # the built package and consumes it under zod 3 and zod 4, through
+      # require() and import, so an API drift on either major fails here.
+      - name: Verify both zod majors (both module formats)
+        run: node sdks/typescript/packages/core/scripts/verify-zod-matrix.mjs
 
   # The lane above runs against the SDK version the lockfile pins. The
   # aws-strands package declares an open-ended `@strands-agents/sdk` peer, and

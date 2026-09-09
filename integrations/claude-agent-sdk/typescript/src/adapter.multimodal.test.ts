@@ -239,6 +239,62 @@ describe("ClaudeAgentAdapter multimodal input", () => {
     ).toThrow("opaque file id");
   });
 
+  it.each([
+    {
+      name: "image data",
+      block: { type: "binary", mimeType: "image/png", data: "aW1hZ2U=" },
+      expected: {
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
+      },
+    },
+    {
+      name: "image URL",
+      block: {
+        type: "binary",
+        mimeType: "image/png",
+        url: "https://example.com/image.png",
+      },
+      expected: {
+        type: "image",
+        source: { type: "url", url: "https://example.com/image.png" },
+      },
+    },
+    {
+      name: "PDF data",
+      block: { type: "binary", mimeType: "application/pdf", data: "cGRm" },
+      expected: {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: "cGRm" },
+      },
+    },
+    {
+      name: "PDF URL",
+      block: {
+        type: "binary",
+        mimeType: "application/pdf",
+        url: "https://example.com/file.pdf",
+      },
+      expected: {
+        type: "document",
+        source: { type: "url", url: "https://example.com/file.pdf" },
+      },
+    },
+  ])("preserves legacy binary $name input", async ({ block, expected }) => {
+    await runAdapter([{ id: "1", role: "user", content: [block] }]);
+
+    await expect(
+      collectPrompt(queryMock.mock.calls[0][0].prompt),
+    ).resolves.toEqual([
+      {
+        type: "user",
+        message: { role: "user", content: [expected] },
+        parent_tool_use_id: null,
+        session_id: "thread-media",
+      },
+    ]);
+  });
+
   it("emits AG-UI error events when adapter input conversion fails", async () => {
     const events = await runAdapter([
       {

@@ -1,0 +1,34 @@
+{
+  "name": "open-message-at-run-finished-fatal",
+  "area": "lifecycle",
+  "description": "RUN_FINISHED while a text message is still open is fatal — everything the run opened must be closed first",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop the activeMessages check in the RUN_FINISHED case of verifyEvents so a run may close over an open message",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-open-message-at-run-finished",
+      "runId": "open-message-at-run-finished-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "open-message-at-run-finished-m-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "open-message-at-run-finished-m-1",
+      "delta": "never closed"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-open-message-at-run-finished",
+      "runId": "open-message-at-run-finished-r-1"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "Cannot send 'RUN_FINISHED' while text messages are still active"
+  }
+}

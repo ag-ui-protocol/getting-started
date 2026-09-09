@@ -151,7 +151,9 @@ class TestTextMessageRoles(unittest.TestCase):
         
         self.assertEqual(event.type, EventType.TEXT_MESSAGE_START)
         self.assertEqual(event.message_id, "test-msg")
-        self.assertEqual(event.role, "assistant")  # Should default to assistant
+        # An absent role MEANS assistant (schema prose); the default is
+        # documentation and is never materialised, as in TypeScript.
+        self.assertIsNone(event.role)
 
 
 if __name__ == "__main__":

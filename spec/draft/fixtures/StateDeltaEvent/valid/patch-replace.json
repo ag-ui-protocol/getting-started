@@ -1,0 +1,10 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "replace",
+      "path": "/status",
+      "value": "done"
+    }
+  ]
+}

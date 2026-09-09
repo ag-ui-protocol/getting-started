@@ -12,16 +12,23 @@ Key features:
 Example usage:
 
 ```python
-from ag_ui.core import UserMessage, TextInputContent, BinaryInputContent
+from ag_ui.core import (
+    ImageInputContent,
+    InputContentDataSource,
+    InputContentUrlSource,
+    TextInputContent,
+    UserMessage,
+)
 
 # Create a multimodal user message
 message = UserMessage(
     id="user-123",
     content=[
         TextInputContent(text="What's in this image?"),
-        BinaryInputContent(
-            mime_type="image/jpeg",
-            url="https://example.com/photo.jpg"
+        ImageInputContent(
+            source=InputContentUrlSource(
+                value="https://example.com/photo.jpg", mime_type="image/jpeg"
+            )
         ),
     ],
 )
@@ -31,10 +38,12 @@ message_with_data = UserMessage(
     id="user-124",
     content=[
         TextInputContent(text="Describe this picture"),
-        BinaryInputContent(
-            mime_type="image/png",
-            data="iVBORw0KGgoAAAANSUhEUgAAAAUA...",  # base64 encoded
-            filename="screenshot.png"
+        ImageInputContent(
+            source=InputContentDataSource(
+                value="iVBORw0KGgoAAAANSUhEUgAAAAUA...",  # base64 encoded
+                mime_type="image/png",
+            ),
+            metadata={"filename": "screenshot.png"},
         ),
     ],
 )

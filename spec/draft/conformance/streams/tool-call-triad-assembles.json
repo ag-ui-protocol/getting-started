@@ -1,0 +1,42 @@
+{
+  "name": "tool-call-triad-assembles",
+  "area": "streaming",
+  "description": "start/args/args/end assembles one tool call on its parent assistant message, arguments concatenated in arrival order",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make the reducer's TOOL_CALL_ARGS branch assign the delta instead of appending it to the call's arguments",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-tool-triad", "runId": "tool-triad-r1", "protocolVersion": "1.0" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "tool-triad-m1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "tool-triad-m1", "delta": "Looking it up." },
+    { "type": "TEXT_MESSAGE_END", "messageId": "tool-triad-m1" },
+    {
+      "type": "TOOL_CALL_START",
+      "toolCallId": "tool-triad-tc1",
+      "toolCallName": "search",
+      "parentMessageId": "tool-triad-m1"
+    },
+    { "type": "TOOL_CALL_ARGS", "toolCallId": "tool-triad-tc1", "delta": "{\"q\":" },
+    { "type": "TOOL_CALL_ARGS", "toolCallId": "tool-triad-tc1", "delta": "\"agui\"}" },
+    { "type": "TOOL_CALL_END", "toolCallId": "tool-triad-tc1" },
+    { "type": "RUN_FINISHED", "threadId": "t-tool-triad", "runId": "tool-triad-r1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "tool-triad-m1",
+        "role": "assistant",
+        "content": "Looking it up.",
+        "toolCalls": [
+          {
+            "id": "tool-triad-tc1",
+            "type": "function",
+            "function": { "name": "search", "arguments": "{\"q\":\"agui\"}" }
+          }
+        ]
+      }
+    ]
+  }
+}

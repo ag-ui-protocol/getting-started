@@ -1020,7 +1020,7 @@ describe("AgentSubscriber", () => {
         {
           type: EventType.CUSTOM,
           name: "user_interaction",
-          data: { action: "click", target: "button" },
+          value: { action: "click", target: "button" },
         } as CustomEvent,
       ]);
 
@@ -1031,7 +1031,7 @@ describe("AgentSubscriber", () => {
           event: expect.objectContaining({
             type: EventType.CUSTOM,
             name: "user_interaction",
-            data: { action: "click", target: "button" },
+            value: { action: "click", target: "button" },
           }),
           messages: [],
           state: {},
@@ -1113,6 +1113,7 @@ describe("AgentSubscriber", () => {
       realisticAgent.setEventsToEmit([
         {
           type: EventType.RUN_STARTED,
+          threadId: "thread-123",
           runId: "run-123",
         } as RunStartedEvent,
         {
@@ -1165,10 +1166,11 @@ describe("AgentSubscriber", () => {
         } as TextMessageEndEvent,
         {
           type: EventType.STATE_SNAPSHOT,
-          state: { weather: "sunny" },
+          snapshot: { weather: "sunny" },
         } as StateSnapshotEvent,
         {
           type: EventType.RUN_FINISHED,
+          threadId: "thread-123",
           runId: "run-123",
           result: "success",
         } as RunFinishedEvent,
@@ -1273,7 +1275,7 @@ describe("AgentSubscriber", () => {
           state: st,
           agent: {} as any,
           input: {} as any,
-          event: { type: EventType.RUN_STARTED } as any,
+          event: { type: EventType.RUN_STARTED, threadId: "test", runId: "test" } as any,
         }),
       );
 
@@ -1483,6 +1485,7 @@ describe("AgentSubscriber", () => {
       emptyAgent.setEventsToEmit([
         {
           type: EventType.RUN_STARTED,
+          threadId: "thread-123",
           runId: "run-123",
         } as RunStartedEvent,
         {
@@ -1495,6 +1498,7 @@ describe("AgentSubscriber", () => {
         } as StepFinishedEvent,
         {
           type: EventType.RUN_FINISHED,
+          threadId: "thread-123",
           runId: "run-123",
         } as RunFinishedEvent,
       ]);
@@ -1525,7 +1529,10 @@ describe("AgentSubscriber", () => {
           [],
           {},
           (sub, messages, state) =>
-            (sub as { onRunInitialized: (arg: unknown) => void }).onRunInitialized({ messages, state }),
+            (sub as { onRunInitialized: (arg: unknown) => void }).onRunInitialized({
+              messages,
+              state,
+            }),
         );
 
         expect(result).toBeDefined();
@@ -1550,12 +1557,11 @@ describe("AgentSubscriber", () => {
           }),
         };
 
-        await runSubscribersWithMutation(
-          [subscriber],
-          [],
-          mutableState,
-          (sub, messages, state) =>
-            (sub as { onRunInitialized: (arg: unknown) => void }).onRunInitialized({ messages, state }),
+        await runSubscribersWithMutation([subscriber], [], mutableState, (sub, messages, state) =>
+          (sub as { onRunInitialized: (arg: unknown) => void }).onRunInitialized({
+            messages,
+            state,
+          }),
         );
 
         // If we reach here, no ReferenceError was thrown — the guard works.

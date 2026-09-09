@@ -1,0 +1,10 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "add",
+      "path": "/cleared",
+      "value": null
+    }
+  ]
+}

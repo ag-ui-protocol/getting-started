@@ -1,5 +1,9 @@
-import { ActivitySnapshotEventSchema, ActivityDeltaEventSchema, EventType } from "../events";
-import { ActivityMessageSchema } from "../types";
+import { EventType } from "../index";
+import {
+  ActivitySnapshotEventSchema,
+  ActivityDeltaEventSchema,
+  ActivityMessageSchema,
+} from "../schemas";
 
 describe("Activity events", () => {
   it("parses ActivitySnapshotEvent", () => {
@@ -13,7 +17,9 @@ describe("Activity events", () => {
     expect(result.type).toBe(EventType.ACTIVITY_SNAPSHOT);
     expect(result.messageId).toBe("msg_activity");
     expect(result.content.tasks).toEqual(["search"]);
-    expect(result.replace).toBe(true);
+    // An absent replace MEANS replace-the-snapshot — schema prose, not a
+    // materialised default.
+    expect(result.replace).toBeUndefined();
   });
 
   it("respects replace flag in ActivitySnapshotEvent", () => {

@@ -18,7 +18,7 @@ import {
 import { DebugLogger, createDebugLogger } from "@/debug-logger";
 import { v4 as uuidv4 } from "uuid";
 import { structuredClone_ } from "@/utils";
-import { compareVersions } from "compare-versions";
+import { compareVersions, validate as validateVersion } from "compare-versions";
 import { catchError, map, tap } from "rxjs/operators";
 import { finalize } from "rxjs/operators";
 import { takeUntil } from "rxjs/operators";
@@ -28,6 +28,11 @@ import { convertToLegacyEvents } from "@/legacy/convert";
 import { LegacyRuntimeProtocolEvent } from "@/legacy/types";
 import { lastValueFrom } from "rxjs";
 import { transformChunks } from "@/chunks";
+import { enforceEvents } from "@/enforce";
+import {
+  CompatibilityBoundary,
+  compatibilityBoundaryOperator,
+} from "@/middleware/compatibility-boundary";
 import { AgentStateMutation, AgentSubscriber, runSubscribersWithMutation } from "./subscriber";
 import { AGUIConnectNotImplementedError, AGUIError } from "@ag-ui/core";
 import { isInterruptExpired } from "@/interrupts";
@@ -41,6 +46,59 @@ import {
   BackwardCompatibility_0_0_57,
 } from "@/middleware";
 import packageJson from "../../package.json";
+
+/**
+ * The protocol version this client declares on every RunAgentInput it builds.
+ *
+ * Deliberately the protocol LINE, "1.0", not the generated PROTOCOL_VERSION
+ * constant (currently "draft"): the wire names what the client speaks, the
+ * constant names which spec revision the models were generated from, and at
+ * the 1.0 freeze the two collapse into the same string. Also deliberately
+ * comparable: "1.0" works with the compareVersions machinery below, where
+ * "draft" never could.
+ */
+export const WIRE_PROTOCOL_VERSION = "1.0";
+
+/** The maxVersion deprecation warns once per process, not once per call. */
+let warnedDeprecatedMaxVersion = false;
+
+/**
+ * The producer's RUN_STARTED declaration, judged against what this client
+ * speaks. Older or absent is the downgrade signal the versioning rules expect
+ * a consumer to notice quietly; NEWER means material this client may be
+ * stripping, and that deserves a voice.
+ *
+ * The grammar is exactly the published one — two numeric components — checked
+ * BEFORE any comparison: compareVersions would happily read "1", "1.0.0" or
+ * "1.x" as equal to "1.0", and the spec says a value outside the grammar is
+ * handled like a newer one, not silently accepted.
+ */
+export const compareDeclaredProtocol = (
+  declared: string,
+  spoken: string,
+): "newer" | "not-newer" | "uninterpretable" => {
+  if (!/^\d+\.\d+$/.test(declared)) return "uninterpretable";
+  return compareVersions(declared, spoken) > 0 ? "newer" : "not-newer";
+};
+
+const warnOnProducerDeclaration = (event: unknown): void => {
+  const declared = (event as { protocolVersion?: string }).protocolVersion;
+  if (declared === undefined || declared === WIRE_PROTOCOL_VERSION) return;
+  switch (compareDeclaredProtocol(declared, WIRE_PROTOCOL_VERSION)) {
+    case "uninterpretable":
+      console.warn(
+        `[ag-ui] The producer declared protocol version '${declared}', which this client cannot interpret.`,
+      );
+      return;
+    case "newer":
+      console.warn(
+        `[ag-ui] The producer speaks protocol ${declared}; this client speaks ${WIRE_PROTOCOL_VERSION}. Unrecognised material will be stripped with warnings.`,
+      );
+      return;
+    case "not-newer":
+      return;
+  }
+};
 
 export interface RunAgentResult {
   // DEFERRED (PNI-272): tightening this to `unknown` is a breaking change for
@@ -70,8 +128,60 @@ export abstract class AbstractAgent {
   private activeRunDetach$?: Subject<void>;
   private activeRunCompletionPromise?: Promise<void>;
 
-  get maxVersion() {
-    return packageJson.version;
+  /** Stops a legacy override that forwards to this.maxProtocolVersion. */
+  private resolvingPeerCeiling = false;
+
+  private resolvePeerCeiling(name: "maxVersion" | "maxProtocolVersion"): string {
+    if (this.resolvingPeerCeiling) {
+      return packageJson.version;
+    }
+
+    // Inspect descriptors without executing either public getter.
+    let legacyOverride = Object.getOwnPropertyDescriptor(this, "maxVersion");
+    let modernOverride = Object.getOwnPropertyDescriptor(this, "maxProtocolVersion");
+    let proto = Object.getPrototypeOf(this);
+    while (proto && proto !== AbstractAgent.prototype) {
+      legacyOverride ??= Object.getOwnPropertyDescriptor(proto, "maxVersion");
+      modernOverride ??= Object.getOwnPropertyDescriptor(proto, "maxProtocolVersion");
+      proto = Object.getPrototypeOf(proto);
+    }
+
+    // With a legacy override, this base getter is reached via super.maxVersion.
+    // Return the base ceiling instead of entering that override a second time.
+    if (name === "maxVersion" && legacyOverride) {
+      return packageJson.version;
+    }
+    const override = name === "maxProtocolVersion" ? legacyOverride : modernOverride;
+    if (!override) {
+      return packageJson.version;
+    }
+
+    this.resolvingPeerCeiling = true;
+    try {
+      return override.get ? override.get.call(this) : override.value;
+    } finally {
+      this.resolvingPeerCeiling = false;
+    }
+  }
+
+  get maxProtocolVersion(): string {
+    return this.resolvePeerCeiling("maxProtocolVersion");
+  }
+
+  /**
+   * @deprecated Use {@link maxProtocolVersion}. Same value, honest name: this
+   * is the ceiling the PEER speaks, not which protocol this SDK implements —
+   * that is the generated PROTOCOL_VERSION constant. Registered in the client
+   * package's DEPRECATIONS.md; removal no earlier than 2.0.
+   */
+  get maxVersion(): string {
+    if (!this.resolvingPeerCeiling && !warnedDeprecatedMaxVersion) {
+      warnedDeprecatedMaxVersion = true;
+      console.warn(
+        "[ag-ui] AbstractAgent.maxVersion is deprecated — use maxProtocolVersion. Same value; the new name says whose version it is and that it is a ceiling.",
+      );
+    }
+    return this.resolvePeerCeiling("maxVersion");
   }
 
   get debug(): ResolvedAgentDebugConfig {
@@ -89,12 +199,27 @@ export abstract class AbstractAgent {
 
   set debugLogger(value: DebugLogger | boolean | undefined) {
     if (typeof value === "boolean") {
-      this._debugLogger = value
-        ? createDebugLogger(resolveAgentDebugConfig(true))
-        : undefined;
+      this._debugLogger = value ? createDebugLogger(resolveAgentDebugConfig(true)) : undefined;
     } else {
       this._debugLogger = value;
     }
+  }
+
+  /**
+   * The peer ceiling as the constructor's version gates need it: a string
+   * compareVersions can actually read. A subclass getter is the only writer,
+   * and it can answer with something unusable — most often `undefined`,
+   * because class fields initialise after `super()` returns — so the value is
+   * judged here rather than deep inside the comparison.
+   */
+  private resolvedCeilingDuringConstruction(): string {
+    const ceiling: unknown = this.maxProtocolVersion;
+    if (typeof ceiling !== "string" || !validateVersion(ceiling)) {
+      throw new AGUIError(
+        `maxProtocolVersion resolved to ${JSON.stringify(ceiling)} during construction, which is not a version this client can compare. A ceiling read from an instance field is not available yet — return a literal from the getter.`,
+      );
+    }
+    return ceiling;
   }
 
   constructor({
@@ -113,25 +238,37 @@ export abstract class AbstractAgent {
     this._debug = resolveAgentDebugConfig(debug);
     this._debugLogger = createDebugLogger(this._debug);
 
-    if (compareVersions(this.maxVersion, "0.0.39") <= 0) {
+    // Resolved ONCE, and checked before it is compared. A subclass ceiling is
+    // read through a getter, and this constructor runs before the subclass's
+    // instance fields exist — so `get maxProtocolVersion() { return this.pin }`
+    // hands back `undefined` here and compareVersions threw "Invalid argument
+    // expected string", which named neither the getter nor the field.
+    const peerCeiling = this.resolvedCeilingDuringConstruction();
+
+    if (compareVersions(peerCeiling, "0.0.39") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_39());
     }
 
-    // Auto-insert BackwardCompatibility_0_0_45 for backward compatibility
-    // with legacy THINKING events (deprecated, will be removed in 1.0.0)
-    if (compareVersions(this.maxVersion, "0.0.45") <= 0) {
+    // Auto-insert BackwardCompatibility_0_0_45 for backward compatibility with
+    // the retired THINKING_* events. Registered in the repo-root
+    // DEPRECATIONS.md (not this package's own, which tracks a different set
+    // under a different schema) with an expiry of 2027-08-24, not removed in
+    // 1.0 — see also the note on
+    // CompatibilityBoundary, which translates the same shapes innermost and so
+    // usually gets to them first.
+    if (compareVersions(peerCeiling, "0.0.45") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_45());
     }
 
     // Auto-insert BackwardCompatibility_0_0_47 for backward compatibility
     // with legacy BinaryInputContent (maps to dedicated image/audio/video/document types)
-    if (compareVersions(this.maxVersion, "0.0.47") <= 0) {
+    if (compareVersions(peerCeiling, "0.0.47") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_47());
     }
 
     // Auto-insert BackwardCompatibility_0_0_57 for backward compatibility with
     // pre-subagent agents: strips subagentRunId and drops SUBAGENT_* lifecycle events.
-    if (compareVersions(this.maxVersion, "0.0.57") <= 0) {
+    if (compareVersions(peerCeiling, "0.0.57") <= 0) {
       this.middlewares.unshift(new BackwardCompatibility_0_0_57());
     }
   }
@@ -180,6 +317,7 @@ export abstract class AbstractAgent {
 
       const subscribers: AgentSubscriber[] = [
         {
+          onRunStartedEvent: ({ event }) => warnOnProducerDeclaration(event),
           onRunFinishedEvent: (params) => {
             if (params.outcome === "success") {
               result = params.result;
@@ -202,11 +340,12 @@ export abstract class AbstractAgent {
       const pipeline = pipe(
         () => {
           // Build middleware chain using reduceRight so middlewares can intercept runs.
-          if (this.middlewares.length === 0) {
-            return this.run(input);
-          }
-
-          const chainedAgent = this.middlewares.reduceRight(
+          // The always-on inbound compatibility boundary runs innermost —
+          // closest to the wire — so every other middleware and the
+          // enforcement stage see 1.0-shaped events. Appended per run and
+          // never stored, so it is installed exactly once regardless of
+          // use() or clone().
+          const chainedAgent = [...this.middlewares, new CompatibilityBoundary()].reduceRight(
             (nextAgent: AbstractAgent, middleware) =>
               ({
                 run: (i: RunAgentInput) => middleware.run(i, nextAgent),
@@ -222,6 +361,15 @@ export abstract class AbstractAgent {
 
           return chainedAgent.run(input);
         },
+        // Enforcement BEFORE expansion: a chunk is an event of its own, so it
+        // is validated as one like any other, and expansion then only ever
+        // reshapes values already known good. Expanding first handed this stage
+        // repaired input — a malformed role arrived as "assistant" — so the
+        // same defect was fatal when a producer sent it plainly and invisible
+        // when it sent it as a chunk. Verification stays after expansion,
+        // because what it checks (messages opening and closing, pairing) only
+        // exists once the chunk has become a start and a content event.
+        enforceEvents(this.debugLogger),
         transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
@@ -279,6 +427,7 @@ export abstract class AbstractAgent {
 
       const subscribers: AgentSubscriber[] = [
         {
+          onRunStartedEvent: ({ event }) => warnOnProducerDeclaration(event),
           onRunFinishedEvent: (params) => {
             if (params.outcome === "success") {
               result = params.result;
@@ -300,6 +449,11 @@ export abstract class AbstractAgent {
 
       const pipeline = pipe(
         () => defer(() => this.connect(input)),
+        // The connect flow has no middleware chain, so the always-on inbound
+        // boundary applies as a plain operator here (composed with enforcement:
+        // rxjs pipe() runs out of typed arities beyond nine stages).
+        (source$: Observable<BaseEvent>) =>
+          enforceEvents(this.debugLogger)(compatibilityBoundaryOperator()(source$)),
         transformChunks(this.debugLogger),
         verifyEvents(this.debugLogger),
         // Stop processing immediately when this run is detached
@@ -373,7 +527,12 @@ export abstract class AbstractAgent {
             });
           });
         }
-        if (event.state) {
+        // `!== undefined`, not truthiness: State is any JSON value, so a
+        // snapshot of `null`, `0`, `""` or `false` is a replacement like any
+        // other. The mutation channel only carries `state` when a stage
+        // actually set it, so presence is the signal — a truthiness check
+        // silently discarded every falsy replacement.
+        if (event.state !== undefined) {
           this.state = event.state;
           subscribers.forEach((subscriber) => {
             subscriber.onStateChanged?.({
@@ -406,6 +565,12 @@ export abstract class AbstractAgent {
     return {
       threadId: this.threadId,
       runId: parameters?.runId || uuidv4(),
+      // Declared only when the peer's ceiling is not pinned below this
+      // client: a downgraded peer predates the field, and an unknown input
+      // member is exactly what a strict old parser could reject.
+      ...(compareVersions(this.maxProtocolVersion, packageJson.version) >= 0 && {
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+      }),
       tools: structuredClone_(parameters?.tools ?? []),
       context: structuredClone_(parameters?.context ?? []),
       forwardedProps: structuredClone_(parameters?.forwardedProps ?? {}),
@@ -418,17 +583,24 @@ export abstract class AbstractAgent {
   protected async onInitialize(input: RunAgentInput, subscribers: AgentSubscriber[]) {
     if (this.pendingInterrupts.length > 0) {
       const resumeIds = new Set((input.resume ?? []).map((r) => r.interruptId));
-      const uncovered = this.pendingInterrupts
-        .map((i) => i.id)
-        .filter((id) => !resumeIds.has(id));
+      const uncovered = this.pendingInterrupts.map((i) => i.id).filter((id) => !resumeIds.has(id));
       if (uncovered.length > 0) {
         throw new AGUIError(
           `Thread has ${uncovered.length} pending interrupt(s) not addressed by resume: ${uncovered.join(", ")}`,
         );
       }
       for (const i of this.pendingInterrupts) {
-        if (isInterruptExpired(i)) {
-          throw new AGUIError(`Interrupt ${i.id} expired at ${i.expiresAt}`);
+        if (!isInterruptExpired(i)) continue;
+        // Expiry forecloses ANSWERING, not resolving the thread: a cancelled
+        // entry is the conforming way past an interrupt nobody answered in
+        // time. Throwing on mere presence — which this once did — made an
+        // expired interrupt block its thread forever, since coverage is
+        // mandatory and no entry could ever satisfy this check.
+        const entry = (input.resume ?? []).find((r) => r.interruptId === i.id);
+        if (entry?.status !== "cancelled") {
+          throw new AGUIError(
+            `Interrupt ${i.id} expired at ${i.expiresAt} and can no longer be answered. Cancel it to continue the thread.`,
+          );
         }
       }
     }
@@ -454,7 +626,15 @@ export abstract class AbstractAgent {
             delete (message as { subagentRunId?: string | null }).subagentRunId;
           }
         }
-        input.messages = onRunInitializedMutation.messages;
+        // The activity filter from prepareRunAgentInput has to be re-applied
+        // for the same reason the null-tag sanitisation above does: this
+        // assignment lands AFTER that filter ran, and a subscriber replacing
+        // the message list is the one writer that can still put an activity
+        // message — the consumer's own display state, which no producer owns —
+        // onto the wire. The AGENT keeps it; only the input copy is filtered.
+        input.messages = onRunInitializedMutation.messages.filter(
+          (message) => message.role !== "activity",
+        );
         subscribers.forEach((subscriber) => {
           subscriber.onMessagesChanged?.({
             messages: this.messages,
@@ -464,7 +644,9 @@ export abstract class AbstractAgent {
           });
         });
       }
-      if (onRunInitializedMutation.state) {
+      // `!== undefined`, as in apply(): a subscriber may legitimately set a
+      // falsy state, and the mutation only carries the key when it did.
+      if (onRunInitializedMutation.state !== undefined) {
         this.state = onRunInitializedMutation.state;
         input.state = onRunInitializedMutation.state;
         subscribers.forEach((subscriber) => {
@@ -723,11 +905,7 @@ export abstract class AbstractAgent {
 
     // Build middleware chain for legacy bridge
     const runObservable = (() => {
-      if (this.middlewares.length === 0) {
-        return this.run(input);
-      }
-
-      const chainedAgent = this.middlewares.reduceRight(
+      const chainedAgent = [...this.middlewares, new CompatibilityBoundary()].reduceRight(
         (nextAgent: AbstractAgent, middleware) =>
           ({
             run: (i: RunAgentInput) => middleware.run(i, nextAgent),
@@ -745,6 +923,7 @@ export abstract class AbstractAgent {
     })();
 
     return runObservable.pipe(
+      enforceEvents(this.debugLogger),
       transformChunks(this.debugLogger),
       verifyEvents(this.debugLogger),
       convertToLegacyEvents(this.threadId, input.runId, this.agentId),

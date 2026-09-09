@@ -3,6 +3,7 @@
   "runId": "run_Id_1",
   "messages": [
     {
+      "id": "",
       "role": "user",
       "content": "What\u0027s the weather in Paris and the current time in Tokyo?"
     }

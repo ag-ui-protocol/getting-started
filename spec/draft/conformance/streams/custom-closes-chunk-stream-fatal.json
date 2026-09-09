@@ -1,0 +1,49 @@
+{
+  "name": "custom-closes-chunk-stream-fatal",
+  "area": "streaming",
+  "description": "CUSTOM ends an open chunk stream, so the id-less continuation that follows has no referent and is fatal",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "move CUSTOM onto the list of events that stand aside from chunk assembly, alongside RAW",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-custom-closes",
+      "runId": "custom-closes-r1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "messageId": "custom-closes-m1",
+      "role": "assistant",
+      "delta": "Half "
+    },
+    {
+      "type": "CUSTOM",
+      "name": "custom-closes-note",
+      "value": {
+        "closes": true
+      }
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "delta": "and half."
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-custom-closes",
+      "runId": "custom-closes-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "First TEXT_MESSAGE_CHUNK must have a messageId"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. With no chunk stage the CUSTOM event closes nothing and the following id-less chunk raises no violation, so the stream is accepted instead of rejected.",
+      "outcome": "completed",
+      "errorContains": "",
+      "messageCount": 0
+    }
+  }
+}

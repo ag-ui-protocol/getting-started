@@ -1,10 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const generatedDir = "src/generated";
+// Overridable so the drift-gate test can regenerate into a temp directory
+// and compare against the committed output. An absolute override is used as
+// given; joining it under the package would mint a junk directory on unix
+// and an invalid drive-mixed path on Windows.
+const generatedDir = process.env.PROTO_GENERATED_DIR ?? "src/generated";
+const outDir = isAbsolute(generatedDir)
+  ? generatedDir
+  : join(packageDir, generatedDir);
 const protoDir = "src/proto";
 const binDir = join(packageDir, "node_modules", ".bin");
 const plugin = join(
@@ -13,7 +20,7 @@ const plugin = join(
 );
 const protoc = join(packageDir, "node_modules", "@protobuf-ts", "protoc", "protoc.js");
 
-mkdirSync(join(packageDir, generatedDir), { recursive: true });
+mkdirSync(outDir, { recursive: true });
 
 const protoFiles = readdirSync(join(packageDir, protoDir))
   .filter((file) => file.endsWith(".proto"))
@@ -25,7 +32,7 @@ const result = spawnSync(
   [
     protoc,
     `--plugin=protoc-gen-ts_proto=${plugin}`,
-    `--ts_proto_out=${generatedDir}`,
+    `--ts_proto_out=${outDir}`,
     "--ts_proto_opt=esModuleInterop=true,outputJsonMethods=false,outputClientImpl=false",
     "-I",
     protoDir,

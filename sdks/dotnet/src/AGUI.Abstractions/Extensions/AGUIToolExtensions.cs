@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace AGUI.Abstractions;
@@ -53,6 +54,11 @@ public static class AGUIToolExtensions
         return ConvertTools(tools);
     }
 
+    // An absent parameter schema and an empty one mean the same thing to an agent,
+    // so a tool that declares none is described with an empty schema.
+    private static readonly JsonElement s_emptyParameterSchema =
+        JsonDocument.Parse("{}").RootElement.Clone();
+
     private static IEnumerable<AITool> ConvertTools(IList<AGUITool> tools)
     {
         foreach (var tool in tools)
@@ -60,7 +66,7 @@ public static class AGUIToolExtensions
             yield return AIFunctionFactory.CreateDeclaration(
                 name: tool.Name,
                 description: tool.Description,
-                jsonSchema: tool.Parameters);
+                jsonSchema: tool.Parameters ?? s_emptyParameterSchema);
         }
     }
 }

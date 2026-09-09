@@ -274,7 +274,9 @@ class TestLegitimateNullsRoundTrip(unittest.TestCase):
         """The state contract: optional, absent means no state, bare null reads
         as absent. All consumers surveyed collapse null into "no state", so the
         wire carries the one spelling every SDK can represent: omission.
-        forwarded_props stays null — it is required, so its None is a value."""
+        forwarded_props goes the same way: the schema settled it as optional
+        across the SDKs (see spec/RECONCILIATION.md), so an unset one is left
+        out rather than written as null."""
         original = types_module.RunAgentInput(
             thread_id="thread_1",
             run_id="run_1",
@@ -286,7 +288,7 @@ class TestLegitimateNullsRoundTrip(unittest.TestCase):
         )
         encoded = original.model_dump_json(by_alias=True)
         self.assertNotIn('"state"', encoded)
-        self.assertIn('"forwardedProps":null', encoded)
+        self.assertNotIn('"forwardedProps"', encoded)
         self.assertEqual(
             original, types_module.RunAgentInput.model_validate_json(encoded)
         )

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { Metadata } from "./generated/types";
 
 /**
  * The key reserved for AG-UI's own use inside a metadata object. Every other
@@ -24,35 +24,15 @@ export const AGUI_METADATA_KEY = "ag-ui";
  * every value on every event, on the streaming hot path, to catch a mistake
  * (a function, a bigint) that already fails loudly at encode time.
  *
- * One consequence worth knowing: `z.record` drops an own `__proto__` key, which
- * is its prototype-pollution guard. Preserving it would need null-prototype
- * objects throughout parsing and protobuf conversion, handing every consumer
- * objects where `hasOwnProperty` throws — a real cost for a key that is
- * essentially only ever an attack probe. Python keeps it; TypeScript does not.
+ * The schema itself now lives in the generated source (MetadataSchema in
+ * src/generated/schemas.ts); this comment survives as the recorded reasoning.
  */
-export const MetadataSchema = z.record(z.any());
-
-export type Metadata = z.infer<typeof MetadataSchema>;
-
 /**
- * How metadata is declared on events and messages.
- *
- * The object itself is absent or an object, never `null` — and parsing
- * enforces that invariant rather than coercing a `null` to absent.
- *
- * This is deliberately NOT the treatment `parentMessageId` and `outcome`
- * receive in `events.ts`. Those tolerate `null` because released producers
- * emitted it before the producer-side omission fix, and rejecting it would
- * break agents already in the wild. Metadata has no such history: it postdates
- * the fix that makes every official producer omit fields with no value, and no
- * released Python or .NET package has ever emitted `"metadata": null`. Adding
- * a tolerance here would grandfather in a fourth exception with nobody to
- * protect; enforcing from day one means there is never anything to retire.
- *
- * A `null` *value under a key* is meaningful data and is preserved. Only a
- * `null` in place of the whole object is a contract violation.
+ * How metadata is declared on events and messages: the object is absent or an
+ * object, never `null`. The validator pinning that invariant is
+ * `OptionalMetadataSchema`, which lives in src/schemas.ts along with every
+ * other runtime validator this package ships.
  */
-export const OptionalMetadataSchema = MetadataSchema.optional();
 
 /**
  * Folds `incoming` metadata into `existing`, key by key, with the last write

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { EventType } from "../index";
 import {
   EventSchemas,
-  EventType,
   RunErrorEventSchema,
   RunFinishedEventSchema,
   TokenUsageSchema,
-} from "../events";
+} from "../schemas";
 
 describe("TokenUsageSchema — numeric-only usage shape", () => {
   it("parses a full usage entry with all allowed fields", () => {
@@ -26,16 +26,18 @@ describe("TokenUsageSchema — numeric-only usage shape", () => {
     expect(() => TokenUsageSchema.parse({})).not.toThrow();
   });
 
-  it("strips unknown / content-bearing fields from a usage entry", () => {
+  it("keeps unknown fields through the parse, like every other validator", () => {
+    // The tolerant layer's promise is uniform: unknown keys survive so the
+    // strip-and-warn enforcement stage can see them. Keeping content-bearing
+    // fields out of usage telemetry is that stage's job (and the producer's),
+    // not a special stripping rule on this one schema.
     const parsed = TokenUsageSchema.parse({
       inputTokens: 5,
-      // must never survive: content-bearing / identifying fields
       prompt: "the secret prompt text",
       threadId: "t-1",
     });
-    expect(parsed).toEqual({ inputTokens: 5 });
-    expect(parsed as Record<string, unknown>).not.toHaveProperty("prompt");
-    expect(parsed as Record<string, unknown>).not.toHaveProperty("threadId");
+    expect(parsed.inputTokens).toBe(5);
+    expect(parsed as Record<string, unknown>).toHaveProperty("prompt");
   });
 
   it("rejects a non-numeric token count", () => {

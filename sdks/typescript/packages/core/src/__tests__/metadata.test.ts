@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { AGUI_METADATA_KEY, EventType, mergeMetadata } from "../index";
 import {
-  AGUI_METADATA_KEY,
   ActivityMessageSchema,
   AssistantMessageSchema,
   BaseEventSchema,
   DeveloperMessageSchema,
-  EventType,
   MetadataSchema,
   OptionalMetadataSchema,
   ReasoningMessageSchema,
@@ -15,8 +14,7 @@ import {
   ToolCallResultEventSchema,
   ToolMessageSchema,
   UserMessageSchema,
-  mergeMetadata,
-} from "../index";
+} from "../schemas";
 
 // Every JSON shape the protocol promises survives a round trip.
 const VALUE_SHAPES = {
@@ -108,7 +106,16 @@ describe("metadata on events", () => {
 describe("metadata on messages", () => {
   // Developer, system, assistant and user derive from BaseMessageSchema; tool,
   // activity and reasoning are standalone schemas that declare it themselves.
-  const cases: Array<[string, { parse: (v: unknown) => { metadata?: unknown } }, object]> = [
+  const cases: Array<
+    [
+      string,
+      {
+        parse: (v: unknown) => { metadata?: unknown };
+        safeParse: (v: unknown) => { success: boolean };
+      },
+      object,
+    ]
+  > = [
     ["developer", DeveloperMessageSchema, { id: "1", role: "developer", content: "c" }],
     ["system", SystemMessageSchema, { id: "1", role: "system", content: "c" }],
     ["assistant", AssistantMessageSchema, { id: "1", role: "assistant", content: "c" }],

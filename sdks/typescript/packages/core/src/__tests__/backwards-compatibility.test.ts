@@ -1,3 +1,4 @@
+import { EventType } from "../index";
 import {
   UserMessageSchema,
   AssistantMessageSchema,
@@ -6,8 +7,7 @@ import {
   RunStartedEventSchema,
   ToolSchema,
   ContextSchema,
-  EventType,
-} from "../index";
+} from "../schemas";
 
 describe("Backwards Compatibility", () => {
   describe("Message Schemas", () => {
@@ -27,9 +27,11 @@ describe("Backwards Compatibility", () => {
         expect(result.data.id).toBe("msg_1");
         expect(result.data.role).toBe("user");
         expect(result.data.content).toBe("Hello");
-        // Extra fields should be stripped (Zod default behavior)
-        expect('futureField' in result.data).toBe(false);
-        expect('anotherNewProp' in result.data).toBe(false);
+        // Unknown keys SURVIVE the parse: dropping them is the strip-and-warn
+        // enforcement stage's job, and a re-serialising intermediary must not
+        // lose a future version's fields.
+        expect('futureField' in result.data).toBe(true);
+        expect('anotherNewProp' in result.data).toBe(true);
       }
     });
 
@@ -248,8 +250,8 @@ describe("Backwards Compatibility", () => {
         expect(
           assistantMessage.role === "assistant" ? assistantMessage.toolCalls?.length : undefined,
         ).toBe(1);
-        expect(result.data.tools.length).toBe(1);
-        expect(result.data.context.length).toBe(1);
+        expect(result.data.tools?.length).toBe(1);
+        expect(result.data.context?.length).toBe(1);
       }
     });
   });

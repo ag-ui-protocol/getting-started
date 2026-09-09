@@ -1,0 +1,72 @@
+# Every fixture in this directory, sorted. Both lanes discover fixtures by
+# reading the directory, so nothing here decides what RUNS — this file exists
+# so that a fixture DISAPPEARING is a diff. `spec/harness/conformance.test.ts`
+# asserts the listing against this file in both directions.
+#
+# Regenerate deliberately, in the same commit as the fixture change:
+#   ls spec/draft/conformance/streams/*.json | xargs -n1 basename | sort
+activity-delta-missing-target-tolerated.json
+activity-replace-false-preserves.json
+activity-snapshot-then-delta.json
+chunk-conflicting-role-fatal.json
+chunk-conflicting-tool-name-fatal.json
+chunk-expansion-assembles.json
+chunk-repeat-identical-accepted.json
+conformant-run-is-quiet.json
+content-without-start-fatal.json
+current-peer-declares-protocol-version.json
+custom-closes-chunk-stream-fatal.json
+encrypted-value-unknown-entity-tolerated.json
+era-0-0-39-flattens-content.json
+era-0-0-45-thinking-translated.json
+era-0-0-47-upgrades-binary-content.json
+era-0-0-57-subagent-dropped-with-warning.json
+era-current-peer-keeps-modern-content.json
+era-pinned-peer-omits-protocol-version.json
+event-after-run-finished-fatal.json
+first-chunk-missing-id-fatal.json
+first-event-not-run-started-fatal.json
+first-tool-chunk-missing-name-fatal.json
+late-run-error-after-finished-run-continues.json
+malformed-known-field-fatal.json
+messages-snapshot-reconciles-by-id.json
+metadata-merges-last-write-wins.json
+nested-run-started-fatal.json
+open-message-at-run-finished-fatal.json
+open-metadata-preserved.json
+open-object-patch-op-extras.json
+producer-declares-newer-version-warns.json
+producer-declares-same-version-quiet.json
+producer-declares-uninterpretable-version-warns.json
+raw-and-custom-pass-through.json
+raw-does-not-close-chunk-stream.json
+reasoning-discipline-verified.json
+reasoning-message-wrong-role-fatal.json
+reasoning-span-and-message.json
+reopen-closed-message-appends.json
+run-error-first-run-continues.json
+run-error-then-new-run-continues.json
+run-finished-interrupt-outcome-accepted.json
+run-finished-with-active-subagent-fatal.json
+state-delta-applies.json
+state-delta-unappliable-warns-and-keeps.json
+state-delta-unknown-op-dropped.json
+state-falsy-snapshot-applies.json
+state-null-snapshot-applies.json
+state-snapshot-replaces.json
+step-finished-without-start-fatal.json
+subagent-attribution-mismatch-fatal.json
+subagent-finished-unstarted-fatal.json
+subagent-started-missing-name-fatal.json
+subagent-terminal-closes-open-chunk-stream.json
+subagent-unannounced-attribution-accepted.json
+tool-call-metadata-lands-on-the-call.json
+tool-call-triad-assembles.json
+triad-assembles-message.json
+two-sequential-runs-accumulate.json
+unknown-enum-value-role-fatal.json
+unknown-event-dropped.json
+unknown-outcome-array-fatal.json
+unknown-outcome-stripped.json
+unknown-part-in-message-list.json
+unknown-property-stripped.json

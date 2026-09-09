@@ -1,0 +1,34 @@
+{
+  "name": "unknown-enum-value-role-fatal",
+  "area": "processing",
+  "description": "ADMITTED GAP: an unrecognised member of a closed string set — a message role — is fatal today, where the specification says it should be stripped; this pins the reference implementation's actual behaviour so the divergence cannot change unnoticed",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "teach stripAgainst to treat a ZodEnum as a closed set and DROP a value outside it — which is the RIGHT fix, and it makes this fixture fail. That is deliberate: this fixture pins today's gap, not the rule. Anyone landing that fix MUST update this fixture to expect a stripped `/role` with a warning AND delete the <Note> on docs/spec/draft/basic/processing.mdx that admits the gap, in the same change. A silent 'fix' that leaves the Note in place is what this fixture exists to catch. The stream around the bad role is conformant — the message is opened, filled and closed before RUN_FINISHED — so the unrecognised role is the ONLY thing that can fail this run. (It used to end with the message still open, so stripping the role would have left the run failing anyway, on the open message, and this fixture would have gone on passing for a reason that has nothing to do with enums.) `errorContains` pins the rejection to the role field for the same purpose.",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-unknown-role",
+      "runId": "r-unknown-role"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-unknown-role",
+      "role": "narrator"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-unknown-role",
+      "delta": "the role above is the only defect in this stream"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-unknown-role" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-unknown-role",
+      "runId": "r-unknown-role"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "role"
+  }
+}

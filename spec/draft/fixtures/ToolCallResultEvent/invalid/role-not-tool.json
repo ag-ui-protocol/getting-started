@@ -1,0 +1,7 @@
+{
+  "type": "TOOL_CALL_RESULT",
+  "messageId": "msg_1",
+  "toolCallId": "call_1",
+  "content": "3 results",
+  "role": "assistant"
+}

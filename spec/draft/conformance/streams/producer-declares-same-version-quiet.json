@@ -1,0 +1,39 @@
+{
+  "name": "producer-declares-same-version-quiet",
+  "area": "versioning",
+  "description": "a producer declaring the version this client speaks is the ordinary case and must pass in silence — the negotiation only speaks up on a difference",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "make the version comparison warn on any declaration rather than only on one that is newer or uninterpretable",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-same-version",
+      "runId": "r-same-version",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-same-version-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-same-version-1",
+      "delta": "same version"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-same-version-1" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-same-version",
+      "runId": "r-same-version"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      { "id": "m-same-version-1", "role": "assistant", "content": "same version" }
+    ]
+  }
+}

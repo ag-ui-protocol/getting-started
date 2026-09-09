@@ -174,10 +174,30 @@ describe("Run Events and Misc Events", () => {
       expectRoundTripEquality(event);
     });
 
-    it("should handle CustomEvent without a value", () => {
+    it("carries a CustomEvent without a value through decode unrepaired", () => {
+      // The schema requires value (an explicit null is the way to say
+      // "nothing"), and this event is malformed. Decoding no longer judges it:
+      // it reports the absence faithfully and the client's enforcement stage
+      // rejects it, exactly as it rejects the same JSON off an SSE stream.
+      // Inventing a value here would be the corruption the schema forbids, and
+      // throwing here would make the binary path harsher than the text one.
+      const event = {
+        type: EventType.CUSTOM,
+        name: "heartbeat",
+      } as unknown as CustomEvent;
+
+      const decoded = decode(encode(event)) as unknown as Record<string, unknown>;
+
+      expect(decoded.type).toBe(EventType.CUSTOM);
+      expect(decoded.name).toBe("heartbeat");
+      expect("value" in decoded).toBe(false);
+    });
+
+    it("round-trips a CustomEvent with an explicit null value", () => {
       const event: CustomEvent = {
         type: EventType.CUSTOM,
         name: "heartbeat",
+        value: null,
       };
 
       expectRoundTripEquality(event);
@@ -228,7 +248,7 @@ describe("Run Events and Misc Events", () => {
           threadId: "thread-basic",
           runId: "run-basic",
         },
-        { type: EventType.CUSTOM, name: "empty" },
+        { type: EventType.CUSTOM, name: "empty", value: null },
       ];
 
       for (const event of events) {
@@ -266,6 +286,7 @@ describe("Run Events and Misc Events", () => {
         {
           type: EventType.CUSTOM,
           name: "full_event",
+          value: { payload: true },
           timestamp: Date.now(),
           rawEvent: { original: "data", from: "external_system" },
         },

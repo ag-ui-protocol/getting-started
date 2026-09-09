@@ -1,0 +1,44 @@
+{
+  "name": "run-finished-with-active-subagent-fatal",
+  "area": "subagents",
+  "description": "a run must not finish while an announced invocation is still open — either it ended and was not reported, or the run is not over",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "drop the active-subagent check from RUN_FINISHED, so an unclosed invocation is silently abandoned",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-run-finished-active-subagent",
+      "runId": "r-run-finished-active-subagent",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "SUBAGENT_STARTED",
+      "subagentRunId": "s-run-finished-active-subagent-1",
+      "name": "researcher"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-run-finished-active-subagent-1",
+      "role": "assistant",
+      "subagentRunId": "s-run-finished-active-subagent-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-run-finished-active-subagent-1",
+      "delta": "working"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "m-run-finished-active-subagent-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-run-finished-active-subagent",
+      "runId": "r-run-finished-active-subagent"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "s-run-finished-active-subagent-1"
+  }
+}

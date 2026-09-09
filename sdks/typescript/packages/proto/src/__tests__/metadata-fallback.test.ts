@@ -1,52 +1,41 @@
-import { describe, expect, it, vi } from "vitest";
-import { EventType } from "@ag-ui/core";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { type BaseEvent, EventType } from "@ag-ui/core";
 import { decode, encode } from "../proto";
 
 describe("metadata on the unvalidated fallback encode path", () => {
-  it("encodes an event that fails validation and carries a null metadata object", () => {
-    // encode() falls back to the raw, unvalidated event when EventSchemas.parse
-    // throws, to stay compatible with producers emitting slightly-off events.
-    // A Pydantic producer dumping without exclude_none emits "metadata": null,
-    // which every SDK reads as absent — so the fallback must not crash on it.
-    // Before the fix this reached Struct.wrap(null) and threw a TypeError.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  let warn: MockInstance<typeof console.warn>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => warn.mockRestore());
 
-    const malformed = {
+  it("still warns for another malformed field after omitting null metadata", () => {
+    // Omitting null metadata must not suppress validation of the invalid role.
+    const malformed: BaseEvent = {
       type: EventType.TEXT_MESSAGE_START,
       messageId: "m1",
       role: "not-a-valid-role",
-      metadata: null,
-    } as any;
+    };
+    Reflect.set(malformed, "metadata", null);
 
-    let bytes: Uint8Array | undefined;
-    expect(() => {
-      bytes = encode(malformed);
-    }).not.toThrow();
-    expect(bytes!.length).toBeGreaterThan(0);
+    const bytes = encode(malformed);
+    expect(bytes.length).toBeGreaterThan(0);
     // It took the fallback path rather than validating cleanly.
     expect(warn).toHaveBeenCalled();
-
-    warn.mockRestore();
   });
 
-  it("treats an event whose metadata is explicitly null as malformed", () => {
-    // A whole-object null is a contract violation (metadata is absent or an
-    // object, never null — see OptionalMetadataSchema), so validation rejects
-    // it and encoding succeeds only through the warn-and-encode fallback.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("omits optional null metadata before validation without a fallback warning", () => {
+    const event: BaseEvent = {
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "m1",
+    };
+    Reflect.set(event, "metadata", null);
 
-    let bytes: Uint8Array | undefined;
-    expect(() => {
-      bytes = encode({
-        type: EventType.TEXT_MESSAGE_END,
-        messageId: "m1",
-        metadata: null,
-      } as any);
-    }).not.toThrow();
-    expect(bytes!.length).toBeGreaterThan(0);
-    expect(warn).toHaveBeenCalled();
-
-    warn.mockRestore();
+    expect(decode(encode(event))).toEqual({
+      type: EventType.TEXT_MESSAGE_END,
+      messageId: "m1",
+    });
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

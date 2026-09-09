@@ -62,9 +62,31 @@ export type ClaudeAgentAdapterConfig = AgentConfig & Options & {
 };
 
 /**
- * Union of all AG-UI event types this adapter can emit.
+ * The extra attribution this adapter rides on every event. Not protocol
+ * fields: the tolerant validators keep unknown keys, and the strip-and-warn
+ * enforcement stage owns dropping them — declared here so the decoration is a
+ * type, not a cast.
+ *
+ * "Owns dropping them" is not free, but not on every event either. Enforcement
+ * validates each event against its own schema in `EVENT_SCHEMA_BY_TYPE`, and
+ * `RunStartedEventSchema` and `RunFinishedEventSchema` both DECLARE `threadId`
+ * and `runId` as required — so on those events the attribution is recognised
+ * and kept. It is only on an event whose schema does not declare them —
+ * `RUN_ERROR` chief among the ones this adapter emits — that `threadId` and
+ * `runId` are unrecognised material a consumer running enforcement strips,
+ * warning once per stripped path, per such event.
  */
-export type ProcessedEvent =
+type AdapterAttribution = {
+  threadId?: string;
+  runId?: string;
+};
+
+/**
+ * Union of all AG-UI event types this adapter can emit, each carrying the
+ * adapter's attribution fields.
+ */
+export type ProcessedEvent = AdapterAttribution &
+  (
   | RunStartedEvent
   | RunFinishedEvent
   | RunErrorEvent
@@ -83,4 +105,4 @@ export type ProcessedEvent =
   | ReasoningEncryptedValueEvent
   | StateSnapshotEvent
   | MessagesSnapshotEvent
-  | CustomEvent;
+  | CustomEvent);

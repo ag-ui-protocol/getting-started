@@ -1,0 +1,48 @@
+{
+  "name": "unknown-outcome-stripped",
+  "area": "processing",
+  "description": "an unrecognised RUN_FINISHED outcome member is stripped from its optional position with a warning, leaving the run to end exactly as an outcome-less RUN_FINISHED does",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "make stripAgainst return the value instead of DROP for an unmatched discriminated-union member \u2014 the run then fails validation. eventTypes and eventAbsentPaths together are what pin the shape of the tolerance: a client that warned and dropped the whole terminal event would otherwise pass, since a stream ending without a terminal is not itself rejected",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-unknown-outcome",
+      "runId": "r-unknown-outcome"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-unknown-outcome",
+      "runId": "r-unknown-outcome",
+      "outcome": {
+        "type": "paused"
+      }
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": [
+      "/outcome"
+    ],
+    "eventTypes": [
+      "RUN_STARTED",
+      "RUN_FINISHED"
+    ],
+    "eventAbsentPaths": [
+      "1.outcome"
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the .NET outcome converter is a closed union, so an unrecognised discriminator is a fatal JsonException rather than stripped material: the run fails and only RUN_STARTED is ever delivered, which is why neither the surviving terminal nor the stripped path can be asserted here. `errorContains` pins the converter's own message \u2014 without the trailing `Path:`/`LineNumber:` detail System.Text.Json appends \u2014 so this lane fails for THIS reason and not for any other rejection",
+      "outcome": "failed",
+      "errorContains": "Unknown RunFinishedOutcome type discriminator: 'paused'",
+      "warnings": [],
+      "noWarnings": true,
+      "eventTypes": [
+        "RUN_STARTED"
+      ],
+      "eventAbsentPaths": []
+    }
+  }
+}

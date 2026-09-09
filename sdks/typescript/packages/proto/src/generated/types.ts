@@ -10,63 +10,143 @@ import { Struct, Value } from "./google/protobuf/struct";
 
 export const protobufPackage = "ag_ui";
 
+/**
+ * A call an assistant message made. Carries no subagent attribution of its own
+ * and inherits its containing message's, since several calls can share one
+ * parent.
+ */
 export interface ToolCall {
+  /**
+   * Identifies the call. The answering tool message carries this as its
+   * toolCallId.
+   */
   id: string;
+  /** The only kind of call the protocol models. */
   type: string;
+  /** What is being called, and with what. */
   function:
     | ToolCall_Function
     | undefined;
   /**
-   * Extra information, open by key. A tool call is not a message, so it carries
-   * its own metadata — several can share one parent assistant message.
+   * Extra information attached to this call. Carried here rather than folded
+   * into the containing message, because several calls can share one parent and
+   * merging them would make the result depend on their order.
    */
-  metadata: { [key: string]: any } | undefined;
+  metadata?:
+    | { [key: string]: any }
+    | undefined;
+  /** A provider's opaque artefact belonging to this call. */
+  encryptedValue?: string | undefined;
 }
 
+/** The name and arguments of a tool call. */
 export interface ToolCall_Function {
+  /** Which tool is being called. */
   name: string;
+  /**
+   * The arguments as a JSON string, not as parsed JSON. Kept as written
+   * because a model can emit arguments that are not valid JSON, and losing
+   * them at the protocol boundary would hide the fault from the consumer that
+   * has to handle it.
+   */
   arguments: string;
 }
 
+/** A text part. */
+export interface TextInputPart {
+  /** The text. */
+  text: string;
+}
+
+/** An image part. */
+export interface ImageInputPart {
+  /** Where the image comes from. */
+  source:
+    | InputContentSource
+    | undefined;
+  /**
+   * Extra information about this part. Unconstrained rather than an object:
+   * inherited from the SDKs, which declare it unknown rather than a record;
+   * listed under known divergences in the README rather than resolved here.
+   */
+  metadata?: any | undefined;
+}
+
+/** Bytes carried inline. */
 export interface InputContentDataSource {
+  /**
+   * The bytes, base64-encoded. contentEncoding is an annotation rather than a
+   * constraint in 2020-12, so a malformed string still validates here; rejecting
+   * one is the decoder's job.
+   */
   value: string;
+  /**
+   * What the bytes are. Required here, unlike on a URL source, because nothing
+   * else can tell a consumer how to read them.
+   */
   mimeType: string;
 }
 
+/** Bytes referenced by URL, fetched by whoever needs them. */
 export interface InputContentUrlSource {
+  /**
+   * The URL. Deliberately not constrained to a URI format, so a scheme a
+   * producer already uses is not rejected here.
+   */
   value: string;
+  /**
+   * What the resource is, when the producer knows. Optional, because the
+   * response can say.
+   */
   mimeType?: string | undefined;
 }
 
+/** Where a media part's bytes come from: carried inline, or referenced by URL. */
 export interface InputContentSource {
   data?: InputContentDataSource | undefined;
   url?: InputContentUrlSource | undefined;
 }
 
-export interface TextInputPart {
-  text: string;
-}
-
-export interface ImageInputPart {
-  source: InputContentSource | undefined;
-  metadata?: any | undefined;
-}
-
+/** An audio part. */
 export interface AudioInputPart {
-  source: InputContentSource | undefined;
+  /** Where the audio comes from. */
+  source:
+    | InputContentSource
+    | undefined;
+  /**
+   * Extra information about this part. Unconstrained, as on the other media
+   * parts.
+   */
   metadata?: any | undefined;
 }
 
+/** A video part. */
 export interface VideoInputPart {
-  source: InputContentSource | undefined;
+  /** Where the video comes from. */
+  source:
+    | InputContentSource
+    | undefined;
+  /**
+   * Extra information about this part. Unconstrained, as on the other media
+   * parts.
+   */
   metadata?: any | undefined;
 }
 
+/** A document part. */
 export interface DocumentInputPart {
-  source: InputContentSource | undefined;
+  /** Where the document comes from. */
+  source:
+    | InputContentSource
+    | undefined;
+  /**
+   * Extra information about this part. Unconstrained, as on the other media
+   * parts.
+   */
   metadata?: any | undefined;
 }
 
+/** One part of a multimodal user message. Discriminated by type. */
 export interface InputContent {
   text?: TextInputPart | undefined;
   image?: ImageInputPart | undefined;
@@ -75,49 +155,225 @@ export interface InputContent {
   document?: DocumentInputPart | undefined;
 }
 
+/** Any message in a conversation. Discriminated by role. */
 export interface Message {
+  /** Identifies the message within the conversation. */
   id: string;
-  role: string;
-  content?: string | undefined;
-  name?: string | undefined;
-  toolCalls: ToolCall[];
-  toolCallId?: string | undefined;
-  error?: string | undefined;
-  contentParts: InputContent[];
   /**
-   * Extra information, open by key. See BaseEvent.metadata in events.proto for
-   * why this is a Struct.
+   * Who the message is from. Each message definition narrows this to a single
+   * value.
    */
-  metadata:
+  role: string;
+  /**
+   * The instructions. Required: a developer message with nothing in it says
+   * nothing.
+   */
+  content?:
+    | string
+    | undefined;
+  /** An optional display name for the author. */
+  name?:
+    | string
+    | undefined;
+  /** The tool calls this turn made. */
+  toolCalls: ToolCall[];
+  /** The call this answers. */
+  toolCallId?:
+    | string
+    | undefined;
+  /**
+   * Why the tool failed, when it did. Present alongside content rather than
+   * instead of it, so a partial result survives a failure.
+   */
+  error?:
+    | string
+    | undefined;
+  /**
+   * What the person sent: either plain text, or an ordered list of parts for a
+   * multimodal message.
+   */
+  contentParts: InputContent[];
+  /** Extra information attached to this message. */
+  metadata?:
     | { [key: string]: any }
     | undefined;
   /**
-   * Which subagent produced this message, absent for the parent's own. Carried
-   * per-message rather than on MessagesSnapshotEvent, since one snapshot mixes
-   * the parent's messages with those of every subagent that ran.
+   * The subagent invocation this belongs to. Absent means the parent agent
+   * produced it directly.
    */
-  subagentRunId?: string | undefined;
+  subagentRunId?:
+    | string
+    | undefined;
+  /**
+   * A provider's opaque artefact belonging to this message, stored by a consumer
+   * and returned on a later turn.
+   */
+  encryptedValue?:
+    | string
+    | undefined;
+  /** What kind of activity this is. An open string: the set is the producer's. */
+  activityType?:
+    | string
+    | undefined;
+  /** The activity's payload, open by key. */
+  activityContent?: { [key: string]: any } | undefined;
 }
 
+/** A tool the agent may call. */
+export interface Tool {
+  /** The tool's name, as the agent will call it. */
+  name: string;
+  /** What the tool does, for the agent to decide when to use it. */
+  description: string;
+  /**
+   * A JSON Schema describing the tool's arguments. Carried opaquely: the
+   * protocol does not constrain or validate it. Optional, because all three SDKs
+   * already treat it that way and a tool that takes no arguments has nothing to
+   * declare; an absent schema and an empty one mean the same thing to an agent.
+   */
+  parameters?:
+    | any
+    | undefined;
+  /**
+   * Extra information about the tool, for consumers that attach their own
+   * rendering or routing information to it.
+   */
+  metadata?: { [key: string]: any } | undefined;
+}
+
+/**
+ * A named piece of ambient information given to the agent for the run, distinct
+ * from the conversation.
+ */
+export interface Context {
+  /** What this context is, for the agent to interpret. */
+  description: string;
+  /** The context itself. */
+  value: string;
+}
+
+/** An answer to one interrupt, sent on the run that continues from it. */
+export interface ResumeEntry {
+  /** The interrupt being answered. */
+  interruptId: string;
+  /** Whether the interrupt was answered or abandoned. */
+  status: string;
+  /** The answer the agent asked for and will act on. Any JSON value. */
+  payload?:
+    | any
+    | undefined;
+  /**
+   * Envelope information about the response, such as signatures or routing keys,
+   * as opposed to payload, which is the answer itself.
+   */
+  metadata?: { [key: string]: any } | undefined;
+}
+
+/**
+ * A request to run an agent. Also echoed back as RUN_STARTED.input. Only
+ * threadId, runId and messages are required: those are the three the SDKs
+ * already agree on, and for tools and context an absent key and an empty array
+ * mean the same thing, so requiring them would catch nothing a producer could
+ * get wrong.
+ */
+export interface RunAgentInput {
+  /** The conversation this run belongs to. */
+  threadId: string;
+  /** Identifies this run. */
+  runId: string;
+  /** The run that spawned this one. */
+  parentRunId?:
+    | string
+    | undefined;
+  /** The state the run starts from. */
+  state?:
+    | any
+    | undefined;
+  /** The conversation so far, in order. */
+  messages: Message[];
+  /** The tools the agent may call. Absent means none. */
+  tools: Tool[];
+  /** Ambient information for the run. Absent means none. */
+  context: Context[];
+  /**
+   * Application-specific values passed through to the agent untouched. Any JSON
+   * value.
+   */
+  forwardedProps?:
+    | any
+    | undefined;
+  /**
+   * Answers to the interrupts that ended a previous run, when this run continues
+   * from one.
+   */
+  resume: ResumeEntry[];
+  /**
+   * The protocol version this consumer speaks, such as "1.0". Absent means the
+   * input was produced before the protocol carried a version — the versioning
+   * rules in the prose govern what each side does with that. Sent in-band rather
+   * than by the transport, so a recorded exchange stays self-describing.
+   */
+  protocolVersion?: string | undefined;
+}
+
+/**
+ * Something a run needs from outside before it can continue, such as an approval
+ * or a missing value.
+ */
 export interface Interrupt {
+  /** Identifies the interrupt. A resume entry answers it by this id. */
   id: string;
+  /**
+   * Why the run stopped. An open string rather than an enumeration: the protocol
+   * does not attempt to classify every reason an agent might need input.
+   */
   reason: string;
-  message?: string | undefined;
-  toolCallId?: string | undefined;
-  responseSchema?: any | undefined;
-  expiresAt?: string | undefined;
+  /** A human-readable prompt for whoever answers. */
+  message?:
+    | string
+    | undefined;
+  /** The tool call this interrupt concerns, when it is a tool approval. */
+  toolCallId?:
+    | string
+    | undefined;
+  /**
+   * A JSON Schema describing the answer this interrupt expects, so a consumer
+   * can build a form for it. Carried opaquely: the protocol does not constrain
+   * or validate it. Restricted to an object because TypeScript and Python both
+   * declare it that way; .NET holds it as any JSON, and the ticket that
+   * commissioned this schema lists it among the arbitrary-JSON fields. Following
+   * the two that constrain it keeps the schema from accepting documents the
+   * reference client rejects, at the cost of rejecting the boolean schemas JSON
+   * Schema also permits — a bare true for "any answer". Recorded as a known
+   * divergence rather than settled.
+   */
+  responseSchema?:
+    | any
+    | undefined;
+  /**
+   * When the interrupt stops being answerable. Deliberately unconstrained rather
+   * than a date-time format, because producers already disagree about the
+   * representation and tightening it here would reject streams that work today.
+   * The documented convention is ISO 8601, and a consumer comparing this value
+   * will parse it as a date, so a value that is not one leaves the interrupt
+   * looking permanently unexpired.
+   */
+  expiresAt?:
+    | string
+    | undefined;
+  /** Extra information attached to this interrupt. */
   metadata?:
     | any
     | undefined;
   /**
-   * The subagent whose work raised this interrupt; absent for a root-raised
-   * interrupt.
+   * The subagent invocation this belongs to. Absent means the parent agent
+   * produced it directly.
    */
   subagentRunId?: string | undefined;
 }
 
 function createBaseToolCall(): ToolCall {
-  return { id: "", type: "", function: undefined, metadata: undefined };
+  return { id: "", type: "", function: undefined, metadata: undefined, encryptedValue: undefined };
 }
 
 export const ToolCall: MessageFns<ToolCall> = {
@@ -133,6 +389,9 @@ export const ToolCall: MessageFns<ToolCall> = {
     }
     if (message.metadata !== undefined) {
       Struct.encode(Struct.wrap(message.metadata), writer.uint32(34).fork()).join();
+    }
+    if (message.encryptedValue !== undefined) {
+      writer.uint32(42).string(message.encryptedValue);
     }
     return writer;
   },
@@ -176,6 +435,14 @@ export const ToolCall: MessageFns<ToolCall> = {
           message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.encryptedValue = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -196,6 +463,7 @@ export const ToolCall: MessageFns<ToolCall> = {
       ? ToolCall_Function.fromPartial(object.function)
       : undefined;
     message.metadata = object.metadata ?? undefined;
+    message.encryptedValue = object.encryptedValue ?? undefined;
     return message;
   },
 };
@@ -254,6 +522,112 @@ export const ToolCall_Function: MessageFns<ToolCall_Function> = {
     const message = createBaseToolCall_Function();
     message.name = object.name ?? "";
     message.arguments = object.arguments ?? "";
+    return message;
+  },
+};
+
+function createBaseTextInputPart(): TextInputPart {
+  return { text: "" };
+}
+
+export const TextInputPart: MessageFns<TextInputPart> = {
+  encode(message: TextInputPart, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.text !== "") {
+      writer.uint32(10).string(message.text);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TextInputPart {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTextInputPart();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.text = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<TextInputPart>, I>>(base?: I): TextInputPart {
+    return TextInputPart.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TextInputPart>, I>>(object: I): TextInputPart {
+    const message = createBaseTextInputPart();
+    message.text = object.text ?? "";
+    return message;
+  },
+};
+
+function createBaseImageInputPart(): ImageInputPart {
+  return { source: undefined, metadata: undefined };
+}
+
+export const ImageInputPart: MessageFns<ImageInputPart> = {
+  encode(message: ImageInputPart, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.source !== undefined) {
+      InputContentSource.encode(message.source, writer.uint32(10).fork()).join();
+    }
+    if (message.metadata !== undefined) {
+      Value.encode(Value.wrap(message.metadata), writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ImageInputPart {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseImageInputPart();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.source = InputContentSource.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.metadata = Value.unwrap(Value.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<ImageInputPart>, I>>(base?: I): ImageInputPart {
+    return ImageInputPart.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ImageInputPart>, I>>(object: I): ImageInputPart {
+    const message = createBaseImageInputPart();
+    message.source = (object.source !== undefined && object.source !== null)
+      ? InputContentSource.fromPartial(object.source)
+      : undefined;
+    message.metadata = object.metadata ?? undefined;
     return message;
   },
 };
@@ -432,112 +806,6 @@ export const InputContentSource: MessageFns<InputContentSource> = {
     message.url = (object.url !== undefined && object.url !== null)
       ? InputContentUrlSource.fromPartial(object.url)
       : undefined;
-    return message;
-  },
-};
-
-function createBaseTextInputPart(): TextInputPart {
-  return { text: "" };
-}
-
-export const TextInputPart: MessageFns<TextInputPart> = {
-  encode(message: TextInputPart, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.text !== "") {
-      writer.uint32(10).string(message.text);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): TextInputPart {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTextInputPart();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.text = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  create<I extends Exact<DeepPartial<TextInputPart>, I>>(base?: I): TextInputPart {
-    return TextInputPart.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<TextInputPart>, I>>(object: I): TextInputPart {
-    const message = createBaseTextInputPart();
-    message.text = object.text ?? "";
-    return message;
-  },
-};
-
-function createBaseImageInputPart(): ImageInputPart {
-  return { source: undefined, metadata: undefined };
-}
-
-export const ImageInputPart: MessageFns<ImageInputPart> = {
-  encode(message: ImageInputPart, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.source !== undefined) {
-      InputContentSource.encode(message.source, writer.uint32(10).fork()).join();
-    }
-    if (message.metadata !== undefined) {
-      Value.encode(Value.wrap(message.metadata), writer.uint32(18).fork()).join();
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): ImageInputPart {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseImageInputPart();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.source = InputContentSource.decode(reader, reader.uint32());
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.metadata = Value.unwrap(Value.decode(reader, reader.uint32()));
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  create<I extends Exact<DeepPartial<ImageInputPart>, I>>(base?: I): ImageInputPart {
-    return ImageInputPart.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<ImageInputPart>, I>>(object: I): ImageInputPart {
-    const message = createBaseImageInputPart();
-    message.source = (object.source !== undefined && object.source !== null)
-      ? InputContentSource.fromPartial(object.source)
-      : undefined;
-    message.metadata = object.metadata ?? undefined;
     return message;
   },
 };
@@ -838,6 +1106,9 @@ function createBaseMessage(): Message {
     contentParts: [],
     metadata: undefined,
     subagentRunId: undefined,
+    encryptedValue: undefined,
+    activityType: undefined,
+    activityContent: undefined,
   };
 }
 
@@ -872,6 +1143,15 @@ export const Message: MessageFns<Message> = {
     }
     if (message.subagentRunId !== undefined) {
       writer.uint32(82).string(message.subagentRunId);
+    }
+    if (message.encryptedValue !== undefined) {
+      writer.uint32(90).string(message.encryptedValue);
+    }
+    if (message.activityType !== undefined) {
+      writer.uint32(98).string(message.activityType);
+    }
+    if (message.activityContent !== undefined) {
+      Struct.encode(Struct.wrap(message.activityContent), writer.uint32(106).fork()).join();
     }
     return writer;
   },
@@ -963,6 +1243,30 @@ export const Message: MessageFns<Message> = {
           message.subagentRunId = reader.string();
           continue;
         }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.encryptedValue = reader.string();
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.activityType = reader.string();
+          continue;
+        }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.activityContent = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -987,6 +1291,396 @@ export const Message: MessageFns<Message> = {
     message.contentParts = object.contentParts?.map((e) => InputContent.fromPartial(e)) || [];
     message.metadata = object.metadata ?? undefined;
     message.subagentRunId = object.subagentRunId ?? undefined;
+    message.encryptedValue = object.encryptedValue ?? undefined;
+    message.activityType = object.activityType ?? undefined;
+    message.activityContent = object.activityContent ?? undefined;
+    return message;
+  },
+};
+
+function createBaseTool(): Tool {
+  return { name: "", description: "", parameters: undefined, metadata: undefined };
+}
+
+export const Tool: MessageFns<Tool> = {
+  encode(message: Tool, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.description !== "") {
+      writer.uint32(18).string(message.description);
+    }
+    if (message.parameters !== undefined) {
+      Value.encode(Value.wrap(message.parameters), writer.uint32(26).fork()).join();
+    }
+    if (message.metadata !== undefined) {
+      Struct.encode(Struct.wrap(message.metadata), writer.uint32(34).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Tool {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTool();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.parameters = Value.unwrap(Value.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<Tool>, I>>(base?: I): Tool {
+    return Tool.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Tool>, I>>(object: I): Tool {
+    const message = createBaseTool();
+    message.name = object.name ?? "";
+    message.description = object.description ?? "";
+    message.parameters = object.parameters ?? undefined;
+    message.metadata = object.metadata ?? undefined;
+    return message;
+  },
+};
+
+function createBaseContext(): Context {
+  return { description: "", value: "" };
+}
+
+export const Context: MessageFns<Context> = {
+  encode(message: Context, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.description !== "") {
+      writer.uint32(10).string(message.description);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Context {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<Context>, I>>(base?: I): Context {
+    return Context.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Context>, I>>(object: I): Context {
+    const message = createBaseContext();
+    message.description = object.description ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseResumeEntry(): ResumeEntry {
+  return { interruptId: "", status: "", payload: undefined, metadata: undefined };
+}
+
+export const ResumeEntry: MessageFns<ResumeEntry> = {
+  encode(message: ResumeEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.interruptId !== "") {
+      writer.uint32(10).string(message.interruptId);
+    }
+    if (message.status !== "") {
+      writer.uint32(18).string(message.status);
+    }
+    if (message.payload !== undefined) {
+      Value.encode(Value.wrap(message.payload), writer.uint32(26).fork()).join();
+    }
+    if (message.metadata !== undefined) {
+      Struct.encode(Struct.wrap(message.metadata), writer.uint32(34).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ResumeEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseResumeEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.interruptId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.payload = Value.unwrap(Value.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.metadata = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<ResumeEntry>, I>>(base?: I): ResumeEntry {
+    return ResumeEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ResumeEntry>, I>>(object: I): ResumeEntry {
+    const message = createBaseResumeEntry();
+    message.interruptId = object.interruptId ?? "";
+    message.status = object.status ?? "";
+    message.payload = object.payload ?? undefined;
+    message.metadata = object.metadata ?? undefined;
+    return message;
+  },
+};
+
+function createBaseRunAgentInput(): RunAgentInput {
+  return {
+    threadId: "",
+    runId: "",
+    parentRunId: undefined,
+    state: undefined,
+    messages: [],
+    tools: [],
+    context: [],
+    forwardedProps: undefined,
+    resume: [],
+    protocolVersion: undefined,
+  };
+}
+
+export const RunAgentInput: MessageFns<RunAgentInput> = {
+  encode(message: RunAgentInput, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.threadId !== "") {
+      writer.uint32(10).string(message.threadId);
+    }
+    if (message.runId !== "") {
+      writer.uint32(18).string(message.runId);
+    }
+    if (message.parentRunId !== undefined) {
+      writer.uint32(26).string(message.parentRunId);
+    }
+    if (message.state !== undefined) {
+      Value.encode(Value.wrap(message.state), writer.uint32(34).fork()).join();
+    }
+    for (const v of message.messages) {
+      Message.encode(v!, writer.uint32(42).fork()).join();
+    }
+    for (const v of message.tools) {
+      Tool.encode(v!, writer.uint32(50).fork()).join();
+    }
+    for (const v of message.context) {
+      Context.encode(v!, writer.uint32(58).fork()).join();
+    }
+    if (message.forwardedProps !== undefined) {
+      Value.encode(Value.wrap(message.forwardedProps), writer.uint32(66).fork()).join();
+    }
+    for (const v of message.resume) {
+      ResumeEntry.encode(v!, writer.uint32(74).fork()).join();
+    }
+    if (message.protocolVersion !== undefined) {
+      writer.uint32(82).string(message.protocolVersion);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RunAgentInput {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRunAgentInput();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.threadId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.runId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.parentRunId = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.state = Value.unwrap(Value.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.messages.push(Message.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.tools.push(Tool.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.context.push(Context.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.forwardedProps = Value.unwrap(Value.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.resume.push(ResumeEntry.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.protocolVersion = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  create<I extends Exact<DeepPartial<RunAgentInput>, I>>(base?: I): RunAgentInput {
+    return RunAgentInput.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RunAgentInput>, I>>(object: I): RunAgentInput {
+    const message = createBaseRunAgentInput();
+    message.threadId = object.threadId ?? "";
+    message.runId = object.runId ?? "";
+    message.parentRunId = object.parentRunId ?? undefined;
+    message.state = object.state ?? undefined;
+    message.messages = object.messages?.map((e) => Message.fromPartial(e)) || [];
+    message.tools = object.tools?.map((e) => Tool.fromPartial(e)) || [];
+    message.context = object.context?.map((e) => Context.fromPartial(e)) || [];
+    message.forwardedProps = object.forwardedProps ?? undefined;
+    message.resume = object.resume?.map((e) => ResumeEntry.fromPartial(e)) || [];
+    message.protocolVersion = object.protocolVersion ?? undefined;
     return message;
   },
 };

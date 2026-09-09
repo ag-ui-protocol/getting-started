@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { EventType } from "../index";
 import {
-  EventType,
   EventSchemas,
   SubagentStartedEventSchema,
   SubagentFinishedEventSchema,
   SubagentErrorEventSchema,
   RunFinishedEventSchema,
-} from "../events";
+} from "../schemas";
 import {
   createSubagentStartedEvent,
   createSubagentFinishedEvent,

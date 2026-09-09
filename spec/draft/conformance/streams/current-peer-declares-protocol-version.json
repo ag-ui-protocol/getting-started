@@ -1,0 +1,29 @@
+{
+  "name": "current-peer-declares-protocol-version",
+  "area": "compatibility",
+  "description": "a client talking to a current peer declares the protocol version it speaks",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "stop declaring protocolVersion on the run input",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-curpin", "runId": "r-1", "protocolVersion": "1.0" },
+    { "type": "RUN_FINISHED", "threadId": "t-curpin", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "request": { "protocolVersion": "1.0" }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client does not implement the in-band version declaration: it sends no protocolVersion and makes no comparison. `request` has to be overridden at all because the base subset names the very member this lane must not send; it is narrowed to the members the client does send rather than left as an empty object that would have matched any request. `requestAbsentPaths` is what pins the absence, and it counts an explicit null as present.",
+      "request": {
+        "threadId": "t-curpin",
+        "runId": "r-1",
+        "messages": []
+      },
+      "requestAbsentPaths": [
+        "protocolVersion"
+      ]
+    }
+  }
+}

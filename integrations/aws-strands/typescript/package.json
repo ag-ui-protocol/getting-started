@@ -51,6 +51,9 @@
       "optional": true
     }
   },
+  "dependencies": {
+    "zod": "^3.25.18 || ^4.0.0"
+  },
   "devDependencies": {
     "@ag-ui/a2ui-toolkit": "workspace:*",
     "@ag-ui/client": "workspace:*",
@@ -70,8 +73,7 @@
     "rxjs": "7.8.1",
     "tsdown": "^0.20.1",
     "typescript": "^5.3.3",
-    "vitest": "^4.0.18",
-    "zod": "^4.4.3"
+    "vitest": "^4.0.18"
   },
   "exports": {
     ".": {
@@ -89,6 +91,16 @@
       "server": [
         "dist/server.d.ts"
       ]
+    }
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "cache": false
+      },
+      "test:coverage": {
+        "cache": false
+      }
     }
   }
 }

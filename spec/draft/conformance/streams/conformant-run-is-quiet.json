@@ -1,0 +1,25 @@
+{
+  "name": "conformant-run-is-quiet",
+  "area": "baseline",
+  "description": "a fully conformant 1.0 stream completes without a single warning",
+  "specPage": "/spec/draft",
+  "kill": "make any stage warn about legal traffic — the guard no other fixture provides",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-clean", "runId": "r-1", "protocolVersion": "1.0" },
+    { "type": "STEP_STARTED", "stepName": "answer" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "m-1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "m-1", "delta": "Hello, " },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "m-1", "delta": "world." },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-1" },
+    { "type": "STATE_SNAPSHOT", "snapshot": { "answered": true } },
+    { "type": "STEP_FINISHED", "stepName": "answer" },
+    { "type": "RUN_FINISHED", "threadId": "t-clean", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [{ "role": "assistant", "content": "Hello, world." }],
+    "state": { "answered": true }
+  }
+}

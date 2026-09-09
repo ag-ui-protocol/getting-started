@@ -1,0 +1,80 @@
+{
+  "name": "run-finished-interrupt-outcome-accepted",
+  "area": "lifecycle",
+  "description": "an interrupt outcome on RUN_FINISHED is described 1.0 material, not something to strip or reject: it survives enforcement without a warning, and it closes the run rather than failing it",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop RunFinishedInterruptOutcomeSchema from the outcome union \u2014 enforcement then strips /outcome with a warning and the delivered RUN_FINISHED arrives without it. eventPaths is what proves the payload survived: asserting only that a RUN_FINISHED was delivered would stay green if the outcome were silently removed",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-run-finished-interrupt",
+      "runId": "run-finished-interrupt-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "run-finished-interrupt-m-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-finished-interrupt-m-1",
+      "delta": "May I proceed?"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "run-finished-interrupt-m-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-run-finished-interrupt",
+      "runId": "run-finished-interrupt-r-1",
+      "outcome": {
+        "type": "interrupt",
+        "interrupts": [
+          {
+            "id": "run-finished-interrupt-i-1",
+            "reason": "approval",
+            "message": "Approve the transfer before the run continues."
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_END",
+      "RUN_FINISHED"
+    ],
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "May I proceed?"
+      }
+    ],
+    "eventPaths": {
+      "4.outcome.type": "interrupt",
+      "4.outcome.interrupts.0.id": "run-finished-interrupt-i-1"
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client's event surface is ChatResponseUpdate.RawRepresentation, and the builder-only events yield no update: TEXT_MESSAGE_START and TEXT_MESSAGE_END open and close the message being assembled and hand a consumer nothing, so they cannot appear in a delivered list however faithfully the client processes them. The list here is the base list minus exactly those; every event this fixture is actually about is still in it, in order. RUN_FINISHED carrying the interrupt outcome is still delivered rather than swallowed, which is the half of this fixture the list is here to pin. The outcome payload is pinned at index 2 rather than the base's 4, because the builder-only TEXT_MESSAGE_START and TEXT_MESSAGE_END yield no update on this lane.",
+      "eventTypes": [
+        "RUN_STARTED",
+        "TEXT_MESSAGE_CONTENT",
+        "RUN_FINISHED"
+      ],
+      "eventPaths": {
+        "2.outcome.type": "interrupt",
+        "2.outcome.interrupts.0.id": "run-finished-interrupt-i-1"
+      }
+    }
+  }
+}

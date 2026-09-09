@@ -768,3 +768,66 @@ describe("transformChunks", () => {
     ).toBe(1);
   });
 });
+
+describe("what a chunk carries into the events it becomes", () => {
+  // A chunk carries one provider payload, and expansion turns it into an opener
+  // and a content event. The content event is the one carrying what the producer
+  // sent, so the payload rides there; the opener is synthesised here and claims
+  // no raw event of its own. Expansion used to drop it entirely, so a chunked
+  // stream silently lost every rawEvent while the same stream sent unchunked
+  // kept them.
+  it("carries rawEvent onto the content event", async () => {
+    const raw = { provider: "openai", keep: true };
+    const events = await firstValueFrom(
+      of({
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        delta: "hi",
+        rawEvent: raw,
+      } as TextMessageChunkEvent).pipe(transformChunks(), toArray()),
+    );
+
+    expect(events[0].type).toBe(EventType.TEXT_MESSAGE_START);
+    expect(events[0]).not.toHaveProperty("rawEvent");
+    expect(events[1].type).toBe(EventType.TEXT_MESSAGE_CONTENT);
+    expect(events[1].rawEvent).toEqual(raw);
+  });
+
+  it("carries rawEvent onto a metadata-only continuation", async () => {
+    const raw = { provider: "openai", seq: 2 };
+    const events = await firstValueFrom(
+      concat(
+        of({
+          type: EventType.TEXT_MESSAGE_CHUNK,
+          messageId: "m1",
+          delta: "hi",
+        } as TextMessageChunkEvent),
+        of({
+          type: EventType.TEXT_MESSAGE_CHUNK,
+          metadata: { a: 1 },
+          rawEvent: raw,
+        } as unknown as TextMessageChunkEvent),
+      ).pipe(transformChunks(), toArray()),
+    );
+
+    const continuation = events[events.length - 1];
+    expect(continuation.type).toBe(EventType.TEXT_MESSAGE_CONTENT);
+    expect(continuation.rawEvent).toEqual(raw);
+  });
+
+  // An ABSENT role means assistant, which the spec states normatively and the
+  // generated validator deliberately does not apply, so this stage is the only
+  // thing that fills it in. A role that is PRESENT and wrong is a different
+  // matter and belongs to enforcement -- see the ordering test in enforce.
+  it("fills in the documented default when the role is absent", async () => {
+    const events = await firstValueFrom(
+      of({
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "m1",
+        delta: "hi",
+      } as TextMessageChunkEvent).pipe(transformChunks(), toArray()),
+    );
+
+    expect((events[0] as TextMessageStartEvent).role).toBe("assistant");
+  });
+});

@@ -3,6 +3,7 @@
   "runId": "run_Id_2",
   "messages": [
     {
+      "id": "",
       "role": "user",
       "content": "What are some fun things to do near me?"
     },

@@ -1,0 +1,336 @@
+---
+title: "Migrating to 1.0"
+description: "What changes for an application or integration moving to AG-UI 1.0, per SDK — and what does not"
+---
+
+AG-UI 1.0 is the first release with a specification behind it: the
+[schema](/spec/draft/schema) is the single source of truth, every SDK's
+protocol types are generated from it, and the behavioural rules that used to
+live only in the TypeScript client are [written down](/spec/draft). Most of
+what changed is additive. This page is the part that is not — what you have to
+touch, per SDK, and what keeps working on its own.
+
+The protocol-level changes are listed in the specification's
+[Key Changes](/spec/draft/changelog); this page does not repeat them, it says
+what each one means for code you already have.
+
+## What keeps working
+
+**A 0.x agent keeps working against a 1.0 client.** The TypeScript client
+carries an always-on compatibility boundary that translates the retired shapes
+it meets on an incoming stream — the five `THINKING_*` events become their
+`REASONING_*` equivalents, a legacy `binary` content part becomes the media part
+its media type names, and historically accepted whole optional `null` fields
+become absent before validation. Every inbound translation warns. These shims
+are recorded, with their replacements and their expiry, in
+[`DEPRECATIONS.md`](https://github.com/ag-ui-protocol/ag-ui/blob/main/DEPRECATIONS.md).
+Their expiry dates are provisional — twelve months from when each shim was
+written, re-dated at the 1.0 release if it slips — after which the retired
+shapes stop working entirely.
+
+**A 1.0 agent keeps working against a 0.x client.** Everything 1.0 adds —
+`RUN_FINISHED.outcome`, the subagent events, `protocolVersion`, activity
+events — is optional or is a new event type, and a client from before the
+version field ignores what it does not know.
+
+**The wire is the same.** JSON over SSE and the protobuf binding are unchanged
+in framing. The field names you send today are the field names 1.0 reads,
+with the exceptions on this page.
+
+---
+
+## TypeScript
+
+The TypeScript SDK takes the most change of the three, because it is where the
+protocol's behaviour was previously defined.
+
+### Omit whole optional null fields
+
+Optional protocol fields must be absent instead of `null`, including `rawEvent`,
+`RUN_FINISHED.result`, and `forwardedProps`. `EventEncoder` and outgoing HTTP
+inputs omit these fields before transmission. Emit the canonical shape from
+in-memory agents too.
+
+Older producers remain compatible where the previous SDK accepted a whole
+optional `null`. Before validation, the client translates it to an absent field
+and warns for `rawEvent`, `RUN_FINISHED.result`, `SUBAGENT_FINISHED.result`,
+resume-entry `payload`, media-part `metadata` (`image`, `audio`, `video`,
+`document`), tool `parameters`, and `RunAgentInput.forwardedProps`. This applies
+to in-memory runs, reconnects, SSE, and protobuf, including messages and input
+echoes embedded in events. Subscribers receive the normalized event: for
+example, an old `RUN_FINISHED.result: null` becomes an absent result.
+
+Direct schema validation remains strict and does not invoke the client's event
+compatibility boundary. Request handlers accepting older `RunAgentInput` values
+must locally omit historically accepted optional nulls before calling
+`RunAgentInputSchema.parse`: `forwardedProps`, `tools[].parameters`,
+`resume[].payload`, and `metadata` on image/audio/video/document parts in
+`messages[].content[]`. Do not recursively strip nulls from application data or
+remove nulls from fields that already rejected them. CopilotKit's shared
+run/connect request parser handles this as a local compatibility exception;
+AG-UI does not expose a public request-normalization helper. The existing
+`RunAgentInput.state: null` parser tolerance still yields `undefined`.
+
+This compatibility is limited to historically accepted fields. Event or message
+`metadata: null` and `parentRunId: null` remain invalid. Required JSON payloads
+such as `CUSTOM.value`, and null values inside state, metadata, or other
+application data, remain valid and are preserved.
+
+### zod is an optional peer dependency of `@ag-ui/core`
+
+`@ag-ui/core`'s main entry is types and constants only and never loads zod.
+The validators live on a subpath, and importing them requires zod (`3.25.18`
+or newer, or any `4.x`):
+
+```ts
+// before
+import { EventSchemas, UserMessageSchema, EventType } from "@ag-ui/core";
+
+// after
+import { EventType } from "@ag-ui/core";
+import { EventSchemas, UserMessageSchema } from "@ag-ui/core/schemas";
+```
+
+```bash
+npm install @ag-ui/core          # types only — nothing else to install
+npm install @ag-ui/core zod      # if you use the validators
+```
+
+Every validator moves, including the historic aliases (`EventSchemas`, the
+`*InputPartSchema` names, `OptionalMetadataSchema`) and the capability
+schemas. `@ag-ui/client` no longer re-exports them either — it re-exports
+core's main entry, and they are not on it. `@ag-ui/client` itself still
+depends on zod, because its enforcement stage validates with it; nothing
+changes in how you install the client.
+
+### Unknown material no longer reaches your code
+
+The client has one enforcement stage, after middleware, on every path. An
+event whose type nothing recognises is dropped with a warning. An unknown
+property on a known event is stripped with a warning naming its path. A
+*malformed* value on a field the protocol defines — a number where a string
+belongs — fails the run, as it always did.
+
+If you were reading a non-standard property off an event in a subscriber, it
+is gone before the subscriber sees it. The sanctioned channel for extra data
+is `metadata`, which is open by key on every event and message and is never
+stripped.
+
+The same applies to what you send: unknown keys on `RunAgentInput` are
+stripped before transmission. The field that exists for exactly that purpose
+is `forwardedProps`, which carries any JSON to the agent untouched.
+
+### Behaviour that is stricter in 1.0
+
+Two rules the client used to apply loosely, or on one path only, now apply
+everywhere. Each of them turns something that quietly succeeded into a run
+that fails.
+
+**Reasoning open/close discipline is verified.** A `REASONING_MESSAGE_CONTENT`
+or `REASONING_MESSAGE_END` naming a message nothing opened, a reasoning span
+closed without being opened, and a span or message still open when the run
+finishes all fail the run. Orphaned fragments and reopens were rejected for
+`THINKING_*` before 1.0; failing the run for a span or message left open at
+`RUN_FINISHED` is new, and matches what text messages and tool calls already
+did. Spans and reasoning messages are separate namespaces — unlike
+`THINKING_*`, a reasoning message does not have to sit inside a span, and a
+`REASONING_START` id does not open a reasoning message.
+
+**The enforcement guarantee holds on every path.** Unknown material is
+stripped *with* a warning and a malformed known value is fatal — and that is
+now true with middleware installed and over the protobuf binding, not only on
+the plain SSE path. Material that used to vanish silently on those paths —
+an unrecognised property on a chunk expanded inside a middleware chain, an
+unknown message role or patch operation crossing the protobuf decoder — now
+rides through to enforcement and is reported where it is dropped.
+
+**`RUN_ERROR` is unchanged, and that is deliberate.** A producer-sent
+`RUN_ERROR` is a well-formed stream — an agent honestly reporting that its run
+failed is not a protocol violation — so the client accepts it: the event is
+delivered to `onRunErrorEvent`, the stream continues, and `runAgent()`
+resolves, exactly as in 0.x. A `RUN_STARTED` after a `RUN_ERROR` begins a new
+run in the same stream, and everything that run produces is applied. If you
+need a rejected promise when a run reports its own failure, raise it from your
+own `onRunErrorEvent` subscriber; the client will not do it for you.
+
+### Retired from the public API
+
+- The five `THINKING_*` events — enum members, types, schemas, factories.
+  Emit `REASONING_*`; incoming `THINKING_*` streams are still translated by
+  the boundary above.
+- `BinaryInputContent` (`{ type: "binary" }`). Use the media parts — `image`,
+  `audio`, `video`, `document` — with a `source`. Incoming legacy parts are
+  still translated.
+- `stripUnknown` and `StripResult` from `@ag-ui/client`. They were the
+  enforcement stage's internals.
+
+### Renames and type changes
+
+- `SubAgentInfo` → `SubagentInfo`, and `multiAgent.subAgents` → `subagents`
+  on `AgentCapabilities`. The wire key changes with it and there is no alias:
+  a declaration still carrying `subAgents` has that key treated as unknown.
+  The protocol spells the word as one everywhere (`subagentRunId`).
+- `RunAgentInput.tools` and `.context` are non-optional on the TypeScript
+  type. Absent on the wire still means empty; the SDK presents it as `[]` so
+  nothing downstream has to narrow.
+- `AbstractAgent.maxVersion` is deprecated in favour of `maxProtocolVersion`.
+  An override of the old name still works and warns once per process.
+- `execution.maxIterations` and `maxExecutionTime` on capabilities validate as
+  non-negative integers within JavaScript's safe range.
+
+### New, and worth knowing
+
+The client declares `protocolVersion: "1.0"` on every `RunAgentInput` and
+reads the producer's answer on `RUN_STARTED`, warning when a producer speaks
+a newer or uninterpretable version. Pinning `maxProtocolVersion` below this
+client package's own version omits the field, for a peer whose parser would
+reject an unknown member.
+
+---
+
+## Python
+
+The Python SDK is producer-side: it defines the shapes an agent emits. The
+changes are narrower, and one of them affects anyone parsing its output.
+
+### Absent fields are omitted, never `null`
+
+A field with no value is left out of the JSON rather than written as `null`.
+This shipped ahead of 1.0, in `ag-ui-protocol` 0.1.20, so it is only a
+migration step if you are coming from earlier than that — but it is the change
+most likely to affect anything that parses an agent's output. A reader doing
+`if payload["parentMessageId"] is None` or the equivalent needs
+`"parentMessageId" not in payload`. A `null` that *is* a value — under a
+metadata key, inside a state snapshot, a JSON Patch `add` of `null` — is
+preserved exactly; only a `null` standing in for a whole absent field is gone.
+
+### Generated models replace the hand-written ones
+
+`ag_ui.core` keeps every name it exported except the ones retired and renamed
+below, now re-exported from the generated source, and construction is
+unchanged: snake_case keyword arguments, aliases on the wire. Three behaviours
+differ:
+
+- Single-value literals (`type`, a fixed `role`) default to their only legal
+  value; you no longer spell them.
+- Fields with schema defaults (`role` on a text message, `replace` on a
+  patch) parse to `None` when absent rather than to a materialised default.
+- JSON Patch operations parse to typed operation models. The wire form is
+  identical.
+
+Validation stays as tolerant as it was: unknown keys are kept, pydantic's
+default coercion applies. The strict contract is the specification's
+[fixture corpus](/spec/draft/schema-files), not the SDK models.
+
+### Read JSON Patch entries as objects
+
+Entries in `StateDeltaEvent.delta` and `ActivityDeltaEvent.patch` are typed
+operation models, even when you construct the event with dictionaries. Replace
+dictionary reads such as `patch["path"]` and `patch.get("op")` with `patch.path`
+and `patch.op`. The JSON sent over the wire is unchanged.
+
+If a patch library or other existing code needs dictionaries, convert each
+operation with `model_dump(by_alias=True)`. Keeping aliases enabled preserves
+wire keys such as `from` on move and copy operations.
+
+```python
+from ag_ui.core import StateDeltaEvent
+
+event = StateDeltaEvent(delta=[{"op": "replace", "path": "/count", "value": 1}])
+operation = event.delta[0]
+assert operation.path == "/count"  # Previously: event.delta[0]["path"]
+assert operation.op == "replace"  # Previously: event.delta[0].get("op")
+
+patches = [operation.model_dump(by_alias=True) for operation in event.delta]
+assert patches == [{"op": "replace", "path": "/count", "value": 1}]
+```
+
+An adapter that supports both older SDK dictionaries and 1.0 models can keep a
+dictionary entry as-is and call `model_dump(by_alias=True)` only when the entry
+is a model.
+
+### Retired
+
+- The `THINKING_*` events. Emit `REASONING_*`. There is no producer-side
+  shim; the TypeScript client translates old streams on its side.
+- `BinaryInputContent`. Use the media parts.
+
+### Renamed
+
+- `SubAgentInfo` → `SubagentInfo`; `MultiAgentCapabilities.sub_agents` →
+  `subagents` (wire key `subagents`). No alias.
+- `ExecutionCapabilities.max_iterations` and `max_execution_time` now reject
+  negative values.
+
+---
+
+## .NET
+
+The .NET SDK jumps furthest, because it was the last still hand-writing its
+protocol types and because it gains a feature the other two already had.
+
+### Generated models replace ~60 hand-written classes
+
+The surface a consumer sees is the one it saw before, minus what the schema
+retired: the same sealed classes, the same `[JsonPropertyName]` wire names,
+absent members omitted on write. .NET's tolerance of unrecognised material is
+unchanged — an unknown property is skipped, as `System.Text.Json` has always
+done — so nobody should expect a strictness that is not there.
+
+One behaviour is more tolerant than before: an event *type* the SDK has no
+model for is now skipped with a trace warning by both stream readers, rather
+than ending the stream. Decoding a single unknown event on its own still
+throws `AGUIUnknownEventTypeException`.
+
+### Subagents
+
+`SUBAGENT_STARTED`, `SUBAGENT_FINISHED` and `SUBAGENT_ERROR` have models,
+JSON handling and protobuf mappers. `SubagentRunId` is a property on the
+events that can carry attribution — not on the base event — so a consumer
+that switches on event type reads it from the concrete type. The
+[subagent rules](/spec/draft/events/subagents) say what a consumer must do
+with it.
+
+### Retired
+
+- `AGUIBinaryInputContent`, its type constant, and its converter arms. A
+  `DataContent` or `UriContent` crossing the Microsoft.Extensions.AI boundary
+  becomes the media part its media type names, filename in the part's
+  metadata. .NET has no middleware layer and nothing translates an incoming
+  legacy part: a `{ "type": "binary" }` part is an unknown discriminator, and
+  the converter throws a `JsonException` that fails deserialisation of the
+  whole message — and of the snapshot or run input carrying it. A producer
+  still emitting the legacy part must be upgraded before a 1.0 .NET consumer
+  can read it.
+
+### Renames and type changes
+
+- `SubAgentInfo` → `SubagentInfo`; `MultiAgentCapabilities.SubAgents` →
+  `Subagents` (wire key `subagents`). No alias; the old key is skipped.
+- `AgentCapabilities.Custom` and `IdentityCapabilities.Metadata` are
+  `JsonElement?` rather than `IDictionary<string, object?>?`. Build them with
+  `JsonSerializer.SerializeToElement(...)`.
+- `ExecutionCapabilities.MaxIterations` and `MaxExecutionTime` are `long?`
+  rather than `int?`.
+- `Tool.Parameters` and `RunAgentInput.ForwardedProperties` (wire key
+  `forwardedProps`) are nullable `JsonElement?`, as the schema says; a
+  message's `Id` is a non-nullable string that is always written.
+
+### AOT
+
+The source-generated serializer context is the only resolver under
+ahead-of-time compilation. Tool results are serialized by their runtime type,
+and a result of a type the context does not register throws
+`NotSupportedException`. `int` is registered explicitly in 1.0 — it had
+previously been present only by accident.
+
+---
+
+## Where to look next
+
+- The [Key Changes](/spec/draft/changelog) page for the protocol-level
+  differences, with links into the specification.
+- [Capabilities](/spec/draft/basic/capabilities) for what a declaration
+  obliges now that it is specified.
+- [Versioning and compatibility](/spec/draft/basic/versioning) for how a
+  1.0 peer talks to an older one.

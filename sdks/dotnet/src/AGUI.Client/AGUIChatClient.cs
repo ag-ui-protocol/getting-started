@@ -361,7 +361,7 @@ public sealed class AGUIChatClient : DelegatingChatClient
                     input.Context = providedInput.Context;
                 }
 
-                if (providedInput.ForwardedProperties.ValueKind != JsonValueKind.Undefined)
+                if (providedInput.ForwardedProperties is not null)
                 {
                     input.ForwardedProperties = providedInput.ForwardedProperties;
                 }

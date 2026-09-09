@@ -1,0 +1,104 @@
+{
+  "name": "era-0-0-39-flattens-content",
+  "area": "compatibility",
+  "description": "a 0.0.39 peer receives flattened text content, and the parts it cannot receive are reported rather than dropped in silence",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove the content flattening from BackwardCompatibility_0_0_39, or its dropped-parts warning. NOT the version gate: this fixture pins an eligible peer, so making the shim unconditional leaves it installed and the fixture green \u2014 the gate is killed by era-current-peer-keeps-modern-content instead",
+  "client": {
+    "maxProtocolVersion": "0.0.39"
+  },
+  "input": {
+    "messages": [
+      {
+        "id": "era39-u1",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "What is in this picture?"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "url",
+              "value": "https://example.com/cat.png",
+              "mimeType": "image/png"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-era39",
+      "runId": "r-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "era39-m1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "era39-m1",
+      "delta": "A cat."
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "era39-m1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-era39",
+      "runId": "r-1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": [
+      "DROPS non-text parts"
+    ],
+    "request": {
+      "messages": [
+        {
+          "id": "era39-u1",
+          "role": "user",
+          "content": "What is in this picture?"
+        }
+      ]
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The compatibility shims are TypeScript client middleware; the .NET client has no equivalent, so nothing flattens the content and nothing warns. The image part is described 1.0 material, so \u2014 unlike the retired binary part in era-0-0-47 \u2014 it deserializes cleanly and is sent to the 0.0.39 peer verbatim, which is exactly the loss this shim exists to prevent; the request below pins that unflattened shape. `warnings` is emptied only to displace the base expectation, since an override replaces a key rather than removing it; `noWarnings` is what actually asserts the silence. Alignment is tracked separately.",
+      "warnings": [],
+      "noWarnings": true,
+      "request": {
+        "threadId": "t-era39",
+        "runId": "r-1",
+        "messages": [
+          {
+            "id": "era39-u1",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What is in this picture?"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "url",
+                  "value": "https://example.com/cat.png",
+                  "mimeType": "image/png"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

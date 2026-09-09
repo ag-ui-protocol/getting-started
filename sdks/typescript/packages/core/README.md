@@ -7,22 +7,32 @@ TypeScript definitions & runtime schemas for the **Agent-User Interaction (AG-UI
 ## Installation
 
 ```bash
+# types and constants only — no runtime dependencies
 npm install @ag-ui/core
 pnpm add @ag-ui/core
 yarn add @ag-ui/core
+
+# to use the validators on @ag-ui/core/schemas, add zod (3.25.18+ or 4.x)
+npm install @ag-ui/core zod
 ```
+
+zod is an optional peer dependency: the main entry never loads it, so an
+application that only needs the types installs nothing else.
 
 ## Features
 
 - 🧩 **Typed data models** – `Message`, `Tool`, `Context`, `RunAgentInput`, `State` …
-- 🔄 **Streaming events** – 16 core event kinds covering assistant messages, tool calls, state updates and run lifecycle.
+- 🔄 **Streaming events** – over 30 event kinds covering assistant messages, tool calls, state updates, reasoning, activity, and the run and subagent lifecycles.
 - ✅ **Runtime validation** – schemas catch malformed payloads early.
 - 🚀 **Framework-agnostic** – works in Node.js, browsers and any agent framework that can emit JSON.
 
 ## Quick example
 
 ```ts
-import { EventSchemas, EventType } from "@ag-ui/core";
+import { EventType } from "@ag-ui/core";
+// Validators live on the /schemas subpath and need zod installed; the main
+// entry is types and constants only, so type-only consumers need no zod.
+import { EventSchemas } from "@ag-ui/core/schemas";
 
 // Validate an incoming event
 EventSchemas.parse({

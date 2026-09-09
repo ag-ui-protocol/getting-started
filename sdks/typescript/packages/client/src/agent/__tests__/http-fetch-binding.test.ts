@@ -42,15 +42,9 @@ describe("HttpAgent fetch receiver binding", () => {
   // failure. We simulate the browser's checked receiver here.
   it("calls the default global fetch with a valid receiver (no Illegal invocation)", async () => {
     const seen: Array<{ url: string }> = [];
-    const checkedReceiverFetch = function (
-      this: unknown,
-      url: string,
-      _init?: RequestInit,
-    ) {
+    const checkedReceiverFetch = function (this: unknown, url: string, _init?: RequestInit) {
       if (this !== globalThis && this !== undefined) {
-        throw new TypeError(
-          "Failed to execute 'fetch' on 'Window': Illegal invocation",
-        );
+        throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
       }
       seen.push({ url });
       return Promise.resolve(new Response("ok"));

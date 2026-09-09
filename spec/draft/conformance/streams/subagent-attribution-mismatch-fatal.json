@@ -1,0 +1,40 @@
+{
+  "name": "subagent-attribution-mismatch-fatal",
+  "area": "subagents",
+  "description": "a continuation whose subagentRunId disagrees with its opener's is fatal, because appending one producer's content into another's is undetectable afterwards",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "make the ownership check ignore a continuation's subagentRunId instead of comparing it against the opener's",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-attribution-mismatch",
+      "runId": "r-subagent-attribution-mismatch",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TOOL_CALL_START",
+      "toolCallId": "tc-subagent-attribution-mismatch-1",
+      "toolCallName": "lookup",
+      "subagentRunId": "s-subagent-attribution-mismatch-1"
+    },
+    {
+      "type": "TOOL_CALL_ARGS",
+      "toolCallId": "tc-subagent-attribution-mismatch-1",
+      "delta": "{}"
+    },
+    {
+      "type": "TOOL_CALL_END",
+      "toolCallId": "tc-subagent-attribution-mismatch-1",
+      "subagentRunId": "s-subagent-attribution-mismatch-2"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-attribution-mismatch",
+      "runId": "r-subagent-attribution-mismatch"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "does not match"
+  }
+}

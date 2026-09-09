@@ -21,6 +21,15 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             throw new JsonException("Missing required property 'type' for BaseEvent deserialization");
         }
 
+        // A required discriminator that is not a string is malformed input, not an
+        // event from the future: it must not reach the unknown-type path, which
+        // stream readers are allowed to skip.
+        if (discriminatorElement.ValueKind != JsonValueKind.String)
+        {
+            throw new JsonException(
+                $"Property 'type' for BaseEvent deserialization must be a string, not {discriminatorElement.ValueKind}");
+        }
+
         string? discriminator = discriminatorElement.GetString();
 
         BaseEvent? result = discriminator switch
@@ -33,9 +42,11 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             AGUIEventTypes.TextMessageStart => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageStartEvent))) as TextMessageStartEvent,
             AGUIEventTypes.TextMessageContent => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageContentEvent))) as TextMessageContentEvent,
             AGUIEventTypes.TextMessageEnd => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageEndEvent))) as TextMessageEndEvent,
+            AGUIEventTypes.TextMessageChunk => jsonElement.Deserialize(options.GetTypeInfo(typeof(TextMessageChunkEvent))) as TextMessageChunkEvent,
             AGUIEventTypes.ToolCallStart => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallStartEvent))) as ToolCallStartEvent,
             AGUIEventTypes.ToolCallArgs => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallArgsEvent))) as ToolCallArgsEvent,
             AGUIEventTypes.ToolCallEnd => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallEndEvent))) as ToolCallEndEvent,
+            AGUIEventTypes.ToolCallChunk => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallChunkEvent))) as ToolCallChunkEvent,
             AGUIEventTypes.ToolCallResult => jsonElement.Deserialize(options.GetTypeInfo(typeof(ToolCallResultEvent))) as ToolCallResultEvent,
             AGUIEventTypes.StateSnapshot => jsonElement.Deserialize(options.GetTypeInfo(typeof(StateSnapshotEvent))) as StateSnapshotEvent,
             AGUIEventTypes.StateDelta => jsonElement.Deserialize(options.GetTypeInfo(typeof(StateDeltaEvent))) as StateDeltaEvent,
@@ -54,7 +65,10 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             AGUIEventTypes.SubagentStarted => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentStartedEvent))) as SubagentStartedEvent,
             AGUIEventTypes.SubagentFinished => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentFinishedEvent))) as SubagentFinishedEvent,
             AGUIEventTypes.SubagentError => jsonElement.Deserialize(options.GetTypeInfo(typeof(SubagentErrorEvent))) as SubagentErrorEvent,
-            _ => throw new JsonException($"Unknown BaseEvent type discriminator: '{discriminator}'")
+            // A type this build has no model for: the stream reader skips it, a
+            // caller decoding a single event sees it.
+            _ => throw new AGUIUnknownEventTypeException(
+                $"Unknown BaseEvent type discriminator: '{discriminator}'", discriminator)
         };
 
         if (result == null)
@@ -126,6 +140,12 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
             case ReasoningMessageChunkEvent reasoningMessageChunk:
                 JsonSerializer.Serialize(writer, reasoningMessageChunk, options.GetTypeInfo(typeof(ReasoningMessageChunkEvent)));
                 break;
+            case TextMessageChunkEvent textMessageChunk:
+                JsonSerializer.Serialize(writer, textMessageChunk, options.GetTypeInfo(typeof(TextMessageChunkEvent)));
+                break;
+            case ToolCallChunkEvent toolCallChunk:
+                JsonSerializer.Serialize(writer, toolCallChunk, options.GetTypeInfo(typeof(ToolCallChunkEvent)));
+                break;
             case ReasoningEndEvent reasoningEnd:
                 JsonSerializer.Serialize(writer, reasoningEnd, options.GetTypeInfo(typeof(ReasoningEndEvent)));
                 break;
@@ -157,7 +177,10 @@ public sealed class BaseEventJsonConverter : JsonConverter<BaseEvent>
                 JsonSerializer.Serialize(writer, subagentError, options.GetTypeInfo(typeof(SubagentErrorEvent)));
                 break;
             default:
-                throw new InvalidOperationException($"Unknown event type: {value.GetType().Name}");
+                // A model this converter has no case for: as on the read side,
+                // an event nothing recognises is named rather than guessed at.
+                throw new AGUIUnknownEventTypeException(
+                    $"Unknown event type: {value.GetType().Name}", value.Type);
         }
     }
 }

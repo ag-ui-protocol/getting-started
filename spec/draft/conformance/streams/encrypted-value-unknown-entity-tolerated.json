@@ -1,0 +1,68 @@
+{
+  "name": "encrypted-value-unknown-entity-tolerated",
+  "area": "reasoning",
+  "description": "a REASONING_ENCRYPTED_VALUE naming an entity the consumer does not know must not fail the run; the spec lets a consumer drop it, so delivery is deliberately not required",
+  "specPage": "/spec/draft/events/reasoning",
+  "kill": "make an unresolvable entityId fatal in the reducer, or materialise a message for it \u2014 the spec permits DROPPING the event (MAY), so this fixture must not require delivery: it pins tolerance and the conversation staying intact, nothing more",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-encrypted-unknown-entity",
+      "runId": "r-encrypted-unknown-entity",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-encrypted-unknown-entity-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-encrypted-unknown-entity-1",
+      "delta": "the answer"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "m-encrypted-unknown-entity-1"
+    },
+    {
+      "type": "REASONING_ENCRYPTED_VALUE",
+      "subtype": "message",
+      "entityId": "m-encrypted-unknown-entity-absent",
+      "encryptedValue": "b3BhcXVl"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-encrypted-unknown-entity",
+      "runId": "r-encrypted-unknown-entity"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-encrypted-unknown-entity-1",
+        "role": "assistant",
+        "content": "the answer"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The tolerance the fixture requires holds \u2014 the run completes and the conversation survives \u2014 but .NET materialises the encrypted value as its own reasoning-content update keyed on the entityId, so an unknown entity leaves an extra contentless message behind instead of being stored nowhere. That extra message IS the whole divergence, and the messageCount and messages below are what pin it: this lane must end up with the answer plus one empty message carrying the unresolvable id, rather than with the answer alone. Neither this override nor the base expectation states an event list, deliberately. The specification lets a consumer DROP a REASONING_ENCRYPTED_VALUE whose entity it cannot resolve, so no lane may be held to delivering it, and naming the events either client happens to hand its application would freeze one implementation's surface into a requirement the spec does not make.",
+      "messageCount": 2,
+      "messages": [
+        {
+          "id": "m-encrypted-unknown-entity-1",
+          "role": "assistant",
+          "content": "the answer"
+        },
+        {
+          "id": "m-encrypted-unknown-entity-absent",
+          "role": "assistant"
+        }
+      ]
+    }
+  }
+}

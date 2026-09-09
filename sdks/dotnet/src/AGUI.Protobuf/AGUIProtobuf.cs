@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -24,7 +25,7 @@ internal static class AGUIProtobuf
     /// </summary>
     /// <param name="evt">The event to encode.</param>
     /// <returns>The encoded protobuf message bytes.</returns>
-    /// <exception cref="NotSupportedException">The event type is not representable in the protobuf wire format.</exception>
+    /// <exception cref="AGUIUnknownEventTypeException">The event type is not representable in the protobuf wire format.</exception>
     public static byte[] Encode(BaseEvent evt)
     {
         RequireNotNull(evt, nameof(evt));
@@ -36,7 +37,7 @@ internal static class AGUIProtobuf
     /// </summary>
     /// <param name="evt">The event to encode.</param>
     /// <param name="writer">The destination buffer writer.</param>
-    /// <exception cref="NotSupportedException">The event type is not representable in the protobuf wire format.</exception>
+    /// <exception cref="AGUIUnknownEventTypeException">The event type is not representable in the protobuf wire format.</exception>
     public static void Encode(BaseEvent evt, IBufferWriter<byte> writer)
     {
         RequireNotNull(evt, nameof(evt));
@@ -50,9 +51,32 @@ internal static class AGUIProtobuf
     /// </summary>
     /// <param name="message">The protobuf message bytes.</param>
     /// <returns>The decoded event.</returns>
+    /// <exception cref="AGUIUnknownEventTypeException">The envelope carries no event variant this SDK recognises.</exception>
     public static BaseEvent Decode(ReadOnlySpan<byte> message)
     {
+        // The generated pre-scan rejects envelopes whose malformed shape would
+        // decode differently across runtimes (repeated or multiple event tags)
+        // before the parser's silent merge semantics can pick a winner. It also
+        // answers whether these bytes could be an event newer than this build.
+        bool couldBeNewerEvent = WireGuards.AssertWellFormedEnvelope(message);
         var proto = Proto.Event.Parser.ParseFrom(message);
+
+        // An unset variant mostly means broken bytes — an empty envelope, or a
+        // known tag whose payload will not read as the event it names — and no
+        // reader may skip those. Only an envelope whose sole content is an
+        // unknown event arm is an event a newer producer sent.
+        if (proto.EventCase == Proto.Event.EventOneofCase.None)
+        {
+            if (couldBeNewerEvent)
+            {
+                throw new AGUIUnknownEventTypeException(
+                    "The protobuf envelope carries no AG-UI event variant this SDK recognises.");
+            }
+
+            throw new InvalidDataException(
+                "Invalid event: the envelope carries no readable AG-UI event.");
+        }
+
         return ProtoEventMapper.FromProto(proto);
     }
 
@@ -62,7 +86,7 @@ internal static class AGUIProtobuf
     /// </summary>
     /// <param name="evt">The event to write.</param>
     /// <param name="writer">The destination buffer writer.</param>
-    /// <exception cref="NotSupportedException">The event type is not representable in the protobuf wire format.</exception>
+    /// <exception cref="AGUIUnknownEventTypeException">The event type is not representable in the protobuf wire format.</exception>
     public static void WriteFramed(BaseEvent evt, IBufferWriter<byte> writer)
     {
         RequireNotNull(evt, nameof(evt));
@@ -84,7 +108,10 @@ internal static class AGUIProtobuf
     /// </summary>
     /// <param name="stream">The source stream.</param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
-    /// <returns>An asynchronous sequence of decoded events.</returns>
+    /// <returns>
+    /// An asynchronous sequence of decoded events. A frame carrying an event variant this
+    /// SDK does not recognise is traced and skipped rather than ending the sequence.
+    /// </returns>
     public static async IAsyncEnumerable<BaseEvent> ReadFramedAsync(
         Stream stream,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -107,7 +134,21 @@ internal static class AGUIProtobuf
                 throw new EndOfStreamException("Unexpected end of stream while reading a framed AG-UI event payload.");
             }
 
-            yield return Decode(payload);
+            BaseEvent? decoded;
+            try
+            {
+                decoded = Decode(payload);
+            }
+            catch (AGUIUnknownEventTypeException)
+            {
+                // An event this build has no model for is skipped rather than
+                // ending the stream: the protocol is open at the top, and the
+                // frames after it are still valid.
+                Trace.TraceWarning("[ag-ui] Skipped a framed event of unrecognised type.");
+                continue;
+            }
+
+            yield return decoded;
         }
     }
 

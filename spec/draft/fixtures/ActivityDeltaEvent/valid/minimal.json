@@ -1,0 +1,12 @@
+{
+  "type": "ACTIVITY_DELTA",
+  "messageId": "a1",
+  "activityType": "search",
+  "patch": [
+    {
+      "op": "add",
+      "path": "/hits",
+      "value": 3
+    }
+  ]
+}

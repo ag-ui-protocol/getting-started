@@ -1,5 +1,6 @@
 import { vi } from "vitest";
-import { EventType, RunFinishedEventSchema } from "@ag-ui/client";
+import { EventType } from "@ag-ui/client";
+import { RunFinishedEventSchema } from "@ag-ui/core/schemas";
 import {
   FakeLocalAgent,
   FakeRemoteAgent,

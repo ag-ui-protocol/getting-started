@@ -1,0 +1,7 @@
+{
+  "type": "TEXT_MESSAGE_END",
+  "messageId": "msg_1",
+  "metadata": {
+    "constructor": 1
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "chunk-conflicting-tool-name-fatal",
+  "area": "streaming",
+  "description": "a continuation chunk renaming the call its opener established is fatal, not a late correction",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make chunk expansion overwrite the open call's toolCallName with a continuation's value instead of rejecting the disagreement",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-chunk-tool-name",
+      "runId": "chunk-tool-name-r1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TOOL_CALL_CHUNK",
+      "toolCallId": "chunk-tool-name-tc1",
+      "toolCallName": "search",
+      "delta": "{\"q\":"
+    },
+    {
+      "type": "TOOL_CALL_CHUNK",
+      "toolCallId": "chunk-tool-name-tc1",
+      "toolCallName": "delete",
+      "delta": "\"agui\"}"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-chunk-tool-name",
+      "runId": "chunk-tool-name-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "does not match the open stream's toolCallName"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. With no chunk stage there is no open stream to conflict with, so the stream is accepted instead of rejected.",
+      "outcome": "completed",
+      "errorContains": "",
+      "messageCount": 0
+    }
+  }
+}

@@ -4,8 +4,21 @@ on:
   push:
     branches: [main]
     paths:
+      # The generated-model tests read spec/draft/fixtures at runtime, so a
+      # fixture or schema change must re-run them even when no Python file
+      # moved.
+      - "spec/**"
+      # The cross-language fixtures are read at runtime too — test_capabilities
+      # and test_null_omission are driven entirely by these documents — and they
+      # live outside every tree listed here, so a fixture-only change would
+      # otherwise merge without a single Python lane running.
+      - "sdks/fixtures/**"
       - "sdks/python/**"
       - "integrations/langgraph/python/**"
+      # Outside the langgraph python tree, but test_multimodal.py reads this
+      # shared cross-runtime parity table two levels up and asserts its own
+      # round-trips against it, so editing the table alone can turn that suite red.
+      - "integrations/langgraph/cross-runtime-parity-cases.json"
       - "integrations/watsonx/python/**"
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
@@ -27,16 +40,42 @@ on:
       # ...but not the examples/ apps. Their locks are deliberately out of scope for
       # the lockfiles job (prep-dojo-everything.js relocks them on purpose), so an
       # examples-only lockfile change would spin up every test lane to verify
-      # nothing. Negation must follow the two globs above to override them.
-      - "!examples/**"
+      # nothing. `**/` is load-bearing: GitHub path filters are root-anchored, so
+      # a bare `!examples/**` matches only a top-level examples/ directory, and
+      # this repo has none — it excluded nothing. The real ones live at
+      # integrations/*/python/examples/. Negation must follow every glob above it
+      # to override them.
+      - "!**/examples/**"
+      # ...except the crew-ai examples manifests, which are NOT independent: that
+      # package declares `crewai-agui-dojo = { path = "examples", editable = true }`
+      # as a dev dependency and its own uv.lock transcribes it, so an examples
+      # manifest edit that skipped this workflow would leave crew-ai's lock stale
+      # and fail `uv lock --check` on the next unrelated Python PR. Re-include just
+      # these two coupled files; every other examples/ path stays excluded (only
+      # crew-ai has this `path = "examples"` editable coupling).
+      - "integrations/crew-ai/python/examples/pyproject.toml"
+      - "integrations/crew-ai/python/examples/uv.lock"
       - ".github/python-toolchain.env"
       - ".github/workflows/unit-python-sdk.yml"
       - ".github/actions/**"
   pull_request:
     branches: [main]
     paths:
+      # The generated-model tests read spec/draft/fixtures at runtime, so a
+      # fixture or schema change must re-run them even when no Python file
+      # moved.
+      - "spec/**"
+      # The cross-language fixtures are read at runtime too — test_capabilities
+      # and test_null_omission are driven entirely by these documents — and they
+      # live outside every tree listed here, so a fixture-only change would
+      # otherwise merge without a single Python lane running.
+      - "sdks/fixtures/**"
       - "sdks/python/**"
       - "integrations/langgraph/python/**"
+      # Outside the langgraph python tree, but test_multimodal.py reads this
+      # shared cross-runtime parity table two levels up and asserts its own
+      # round-trips against it, so editing the table alone can turn that suite red.
+      - "integrations/langgraph/cross-runtime-parity-cases.json"
       - "integrations/watsonx/python/**"
       - "integrations/adk-middleware/python/**"
       - "integrations/aws-strands/python/**"
@@ -54,8 +93,21 @@ on:
       # ...but not the examples/ apps. Their locks are deliberately out of scope for
       # the lockfiles job (prep-dojo-everything.js relocks them on purpose), so an
       # examples-only lockfile change would spin up every test lane to verify
-      # nothing. Negation must follow the two globs above to override them.
-      - "!examples/**"
+      # nothing. `**/` is load-bearing: GitHub path filters are root-anchored, so
+      # a bare `!examples/**` matches only a top-level examples/ directory, and
+      # this repo has none — it excluded nothing. The real ones live at
+      # integrations/*/python/examples/. Negation must follow every glob above it
+      # to override them.
+      - "!**/examples/**"
+      # ...except the crew-ai examples manifests, which are NOT independent: that
+      # package declares `crewai-agui-dojo = { path = "examples", editable = true }`
+      # as a dev dependency and its own uv.lock transcribes it, so an examples
+      # manifest edit that skipped this workflow would leave crew-ai's lock stale
+      # and fail `uv lock --check` on the next unrelated Python PR. Re-include just
+      # these two coupled files; every other examples/ path stays excluded (only
+      # crew-ai has this `path = "examples"` editable coupling).
+      - "integrations/crew-ai/python/examples/pyproject.toml"
+      - "integrations/crew-ai/python/examples/uv.lock"
       - ".github/python-toolchain.env"
       - ".github/workflows/unit-python-sdk.yml"
       - ".github/actions/**"

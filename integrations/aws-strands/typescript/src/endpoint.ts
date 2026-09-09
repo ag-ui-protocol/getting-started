@@ -8,12 +8,8 @@ import type {
   Response,
 } from "express";
 import { STATUS_CODES } from "http";
-import {
-  EventType,
-  RunAgentInputSchema,
-  type BaseEvent,
-  type RunAgentInput,
-} from "@ag-ui/core";
+import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
+import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { EventEncoder } from "@ag-ui/encoder";
 import type { StrandsAgent } from "./agent";
 import { resolveLogger, type Logger } from "./logger";

@@ -1,0 +1,20 @@
+{
+  "name": "step-finished-without-start-fatal",
+  "area": "lifecycle",
+  "description": "STEP_FINISHED for a step that was never opened is fatal",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "make the STEP_FINISHED case in verifyEvents ignore a name it does not hold instead of throwing",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-step-finished-without-start",
+      "runId": "step-finished-without-start-r-1",
+      "protocolVersion": "1.0"
+    },
+    { "type": "STEP_FINISHED", "stepName": "step-finished-without-start-never-opened" }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "that was not started"
+  }
+}

@@ -443,6 +443,9 @@ importers:
       rxjs:
         specifier: 7.8.1
         version: 7.8.1
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
     devDependencies:
       '@ag-ui/client':
         specifier: workspace:*
@@ -535,6 +538,10 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   integrations/aws-strands/typescript:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@ag-ui/a2ui-toolkit':
         specifier: workspace:*
@@ -593,9 +600,6 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   integrations/aws-strands/typescript/examples:
     dependencies:
@@ -743,6 +747,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   integrations/community/cloudflare-agents/typescript:
     devDependencies:
@@ -1287,6 +1294,9 @@ importers:
       '@ag-ui/client':
         specifier: workspace:*
         version: link:../../sdks/typescript/packages/client
+      '@ag-ui/core':
+        specifier: workspace:*
+        version: link:../../sdks/typescript/packages/core
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
@@ -1612,6 +1622,9 @@ importers:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
+      '@copilotkit/aimock':
+        specifier: 1.37.4
+        version: 1.37.4(patch_hash=acd26fa3a5219a3b011527cc0bba6dd2f1bc066ce06ec9ad31a8711f5a51e172)(jest@29.7.0(@types/node@20.19.21)(babel-plugin-macros@3.1.0))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4))
       '@types/node':
         specifier: ^20.11.19
         version: 20.19.21
@@ -1635,10 +1648,6 @@ importers:
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
 
   sdks/typescript/packages/core:
-    dependencies:
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
@@ -1646,6 +1655,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^4.0.18
         version: 4.0.18(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4))
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.10
       eslint:
         specifier: ^9.37.0
         version: 9.37.0(jiti@2.6.1)
@@ -1661,6 +1673,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   sdks/typescript/packages/encoder:
     dependencies:
@@ -1704,10 +1719,16 @@ importers:
       '@protobuf-ts/protoc':
         specifier: ^2.11.1
         version: 2.11.1
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.17.4
         version: 0.17.4
+      '@types/node':
+        specifier: ^20.19.21
+        version: 20.19.21
       '@vitest/coverage-istanbul':
         specifier: ^4.0.18
         version: 4.0.18(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4))
@@ -1723,6 +1744,30 @@ importers:
       tsdown:
         specifier: ^0.20.1
         version: 0.20.1(publint@0.3.17)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.21)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6)(yaml@2.8.4)
+
+  spec:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.21
+        version: 20.19.21
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
+      eslint:
+        specifier: ^9.37.0
+        version: 9.37.0(jiti@2.6.1)
+      prettier:
+        specifier: ^3.5.3
+        version: 3.6.2
+      tsx:
+        specifier: ^4.19.2
+        version: 4.20.6
       typescript:
         specifier: ^5.8.2
         version: 5.9.3

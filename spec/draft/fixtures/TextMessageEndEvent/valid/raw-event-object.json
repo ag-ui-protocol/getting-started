@@ -1,0 +1,7 @@
+{
+  "type": "TEXT_MESSAGE_END",
+  "messageId": "m1",
+  "rawEvent": {
+    "a": 1
+  }
+}

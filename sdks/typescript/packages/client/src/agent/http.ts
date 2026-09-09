@@ -1,5 +1,6 @@
 import { AbstractAgent, RunAgentResult } from "./agent";
 import { runHttpRequest } from "@/run/http-request";
+import { enforceOutgoingInput } from "@/enforce";
 import { HttpAgentConfig, HttpAgentFetchFn, RunAgentParameters } from "./types";
 import { RunAgentInput, BaseEvent } from "@ag-ui/core";
 import { structuredClone_ } from "@/utils";
@@ -88,7 +89,16 @@ export class HttpAgent extends AbstractAgent {
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
-    const httpEvents = runHttpRequest(() => this.fetch(this.url, this.requestInit(input)));
+    // The outgoing half of the enforcement boundary: checked immediately
+    // before transmission. Inside the deferred request thunk — not during
+    // pipeline construction, where a throw would escape the run's catchError
+    // and leave lifecycle callbacks and the completion promise hanging — and
+    // before requestInit, so a subclass overriding the request shape still
+    // transmits enforced input. Unknown material is stripped with a warning;
+    // a malformed known field fails the run before a byte leaves the process.
+    const httpEvents = runHttpRequest(() =>
+      this.fetch(this.url, this.requestInit(enforceOutgoingInput(input))),
+    );
     return transformHttpEventStream(httpEvents, this.debugLogger);
   }
 

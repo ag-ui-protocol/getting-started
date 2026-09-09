@@ -6,6 +6,10 @@ on:
     paths:
       - "sdks/dotnet/**"
       - "sdks/typescript/**"
+      - "spec/**"
+      # AgentCapabilitiesFixtureTest and NullOmissionFixtureTest are driven
+      # entirely by these shared documents, which live outside every tree above.
+      - "sdks/fixtures/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/unit-dotnet-sdk.yml"
@@ -14,6 +18,10 @@ on:
     paths:
       - "sdks/dotnet/**"
       - "sdks/typescript/**"
+      - "spec/**"
+      # AgentCapabilitiesFixtureTest and NullOmissionFixtureTest are driven
+      # entirely by these shared documents, which live outside every tree above.
+      - "sdks/fixtures/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/unit-dotnet-sdk.yml"
@@ -79,6 +87,30 @@ jobs:
 
       - name: Run integration tests
         run: dotnet test tests/AGUI.Hosting.AspNetCore.IntegrationTests -c Release -p:SignAssembly=false
+
+      # IsAotCompatible=true is a promise the analyzers only partially check;
+      # publishing and running a real native binary is the proof.
+      - name: Native AOT smoke (AGUI.Protobuf)
+        run: |
+          set -euo pipefail
+          dotnet publish tests/AGUI.Protobuf.AotSmoke -c Release -f net10.0
+          # The SDK picks the RID subdirectory from the machine it publishes on,
+          # so the binary is discovered rather than named: a hardcoded
+          # linux-x64 turns a runner or architecture change into a "no such
+          # file" that reads like a build failure instead of a moved artifact.
+          # Exactly one match is required — zero means the publish produced
+          # nothing and the smoke would otherwise be skipped in silence.
+          smoke=$(
+            find tests/AGUI.Protobuf.AotSmoke/bin/Release/net10.0 \
+              -type f -perm -u+x -name AGUI.Protobuf.AotSmoke -path '*/publish/*' | sort
+          )
+          found=$(printf '%s\n' "$smoke" | grep -c . || true)
+          if [ "$found" -ne 1 ]; then
+            echo "expected exactly one published AOT binary, found $found:" >&2
+            printf '%s\n' "$smoke" >&2
+            exit 1
+          fi
+          "$smoke"
 
   cross-language:
     name: dotnet / cross-language (TS <-> C#)

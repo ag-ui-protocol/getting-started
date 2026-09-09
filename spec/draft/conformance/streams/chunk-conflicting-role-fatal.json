@@ -1,0 +1,44 @@
+{
+  "name": "chunk-conflicting-role-fatal",
+  "area": "streaming",
+  "description": "a continuation chunk repeating role with a value its opener did not establish is fatal \u2014 the producer has said two incompatible things about one message",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make chunk expansion ignore a repeated role on a continuation instead of checking it against the opener",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-chunk-role",
+      "runId": "chunk-role-r1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "messageId": "chunk-role-m1",
+      "role": "user",
+      "delta": "opened as a user message"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "messageId": "chunk-role-m1",
+      "role": "assistant",
+      "delta": " and continued as an assistant one"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-chunk-role",
+      "runId": "chunk-role-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "does not match the open stream's role"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. With no chunk stage there is no open stream to conflict with, so the stream is accepted instead of rejected.",
+      "outcome": "completed",
+      "errorContains": "",
+      "messageCount": 0
+    }
+  }
+}

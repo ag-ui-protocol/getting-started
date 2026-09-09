@@ -1,0 +1,87 @@
+{
+  "name": "era-0-0-57-subagent-dropped-with-warning",
+  "area": "compatibility",
+  "description": "a downgrade that loses subagent lifecycle content says so rather than dropping it in silence",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "remove BackwardCompatibility_0_0_57's warning, or its drop of the SUBAGENT_* lifecycle events",
+  "client": {
+    "maxProtocolVersion": "0.0.57"
+  },
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-era57",
+      "runId": "r-1"
+    },
+    {
+      "type": "SUBAGENT_STARTED",
+      "subagentRunId": "era57-s1",
+      "name": "researcher"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "era57-m1",
+      "role": "assistant",
+      "subagentRunId": "era57-s1"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "era57-m1",
+      "delta": "Found it.",
+      "subagentRunId": "era57-s1"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "era57-m1",
+      "subagentRunId": "era57-s1"
+    },
+    {
+      "type": "SUBAGENT_FINISHED",
+      "subagentRunId": "era57-s1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-era57",
+      "runId": "r-1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": [
+      "dropping SUBAGENT_STARTED"
+    ],
+    "eventTypesAbsent": [
+      "SUBAGENT_STARTED",
+      "SUBAGENT_FINISHED"
+    ],
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "Found it."
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the .NET client has no era shims, so nothing drops the subagent lifecycle events or warns about the loss: they are delivered to application code, which this list pins positively \u2014 lifting the base prohibition alone would have asserted nothing, and a silent .NET drop would have looked identical to the pass-through this override describes",
+      "warnings": [],
+      "noWarnings": true,
+      "messages": [
+        {
+          "id": "era57-m1",
+          "role": "assistant",
+          "content": "Found it.",
+          "subagentRunId": "era57-s1"
+        }
+      ],
+      "eventTypes": [
+        "RUN_STARTED",
+        "SUBAGENT_STARTED",
+        "TEXT_MESSAGE_CONTENT",
+        "SUBAGENT_FINISHED",
+        "RUN_FINISHED"
+      ],
+      "eventTypesAbsent": []
+    }
+  }
+}

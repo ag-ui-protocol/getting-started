@@ -1,0 +1,14 @@
+{
+  "type": "RUN_FINISHED",
+  "threadId": "t1",
+  "runId": "r1",
+  "usage": [
+    {
+      "provider": "openai",
+      "model": "gpt-x",
+      "inputTokens": 10,
+      "outputTokens": 5,
+      "totalTokens": 15
+    }
+  ]
+}

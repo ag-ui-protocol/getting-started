@@ -16,7 +16,9 @@ interface LegacyBinaryContent {
 
 interface NewContentPart {
   type: "image" | "audio" | "video" | "document";
-  source: { type: "data"; value: string; mimeType: string } | { type: "url"; value: string; mimeType: string };
+  source:
+    | { type: "data"; value: string; mimeType: string }
+    | { type: "url"; value: string; mimeType: string };
   metadata?: unknown;
 }
 
@@ -27,7 +29,7 @@ function mimeTypeToContentType(mimeType: string): "image" | "audio" | "video" | 
   return "document";
 }
 
-function isLegacyBinaryContent(part: unknown): part is LegacyBinaryContent {
+export function isLegacyBinaryContent(part: unknown): part is LegacyBinaryContent {
   return (
     typeof part === "object" &&
     part !== null &&
@@ -38,7 +40,9 @@ function isLegacyBinaryContent(part: unknown): part is LegacyBinaryContent {
   );
 }
 
-function convertBinaryToNewFormat(binary: LegacyBinaryContent): NewContentPart | LegacyBinaryContent {
+export function convertBinaryToNewFormat(
+  binary: LegacyBinaryContent,
+): NewContentPart | LegacyBinaryContent {
   const contentType = mimeTypeToContentType(binary.mimeType);
 
   if (binary.data) {
@@ -57,12 +61,22 @@ function convertBinaryToNewFormat(binary: LegacyBinaryContent): NewContentPart |
     };
   }
 
-  // If only `id` is present, we can't map to the new source format.
-  // Return as-is — the schema still accepts BinaryInputContent.
+  // If only `id` is present, we can't map to the new source format. The part
+  // stays in its legacy shape — which the 1.0 contract no longer accepts —
+  // so losing it downstream must not be silent.
+  if (
+    typeof process === "undefined" ||
+    typeof process.env === "undefined" ||
+    !process.env.SUPPRESS_TRANSFORMATION_WARNINGS
+  ) {
+    console.warn(
+      `[ag-ui][compat] A binary content part carries only an id ('${binary.id ?? ""}') and cannot be converted to a modern media part; a 1.0 peer will not accept it. Provide data or a url. See the repo-root DEPRECATIONS.md.`,
+    );
+  }
   return binary;
 }
 
-function upgradeMessageContent(message: InputMessage): InputMessage {
+export function upgradeMessageContent(message: InputMessage): InputMessage {
   const rawContent = (message as { content?: unknown }).content;
 
   if (!Array.isArray(rawContent)) {

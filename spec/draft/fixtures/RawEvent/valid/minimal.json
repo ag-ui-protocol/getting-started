@@ -1,0 +1,6 @@
+{
+  "type": "RAW",
+  "event": {
+    "kind": "provider.chunk"
+  }
+}

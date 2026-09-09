@@ -87,6 +87,7 @@ describe("transformHttpEventStream", () => {
     expect(receivedEvents[0].type).toBe(EventType.RUN_ERROR);
     const runErrorEvent = receivedEvents[0] as any;
     expect(runErrorEvent.rawEvent).toBe(abortError);
+    expect(runErrorEvent.code).toBe("abort");
     expect(completed).toBe(true);
     expect(receivedError).toBeUndefined();
   });

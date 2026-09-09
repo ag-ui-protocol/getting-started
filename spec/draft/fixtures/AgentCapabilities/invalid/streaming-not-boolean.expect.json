@@ -1,0 +1,5 @@
+{
+  "keyword": "type",
+  "instanceLocation": "/transport/streaming",
+  "keywordLocation": "#/$defs/TransportCapabilities/properties/streaming/type"
+}

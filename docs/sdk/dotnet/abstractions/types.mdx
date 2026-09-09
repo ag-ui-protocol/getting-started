@@ -429,7 +429,7 @@ var capabilities = new AgentCapabilities
 | `Multimodal` | `multimodal` | `MultimodalCapabilities?` | Multimodal input and output support |
 | `Execution` | `execution` | `ExecutionCapabilities?` | Code execution and iteration/time limits |
 | `HumanInTheLoop` | `humanInTheLoop` | `HumanInTheLoopCapabilities?` | Approvals, interventions, feedback, interrupts, and approve-with-edits |
-| `Custom` | `custom` | `IDictionary<string, object?>?` | Integration-specific capabilities |
+| `Custom` | `custom` | `JsonElement?` | Integration-specific capabilities, open by key; build it with `JsonSerializer.SerializeToElement(...)` |
 
 See [Capabilities](/concepts/capabilities) for protocol-level concepts and
 usage patterns.

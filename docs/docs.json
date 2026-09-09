@@ -33,6 +33,7 @@
                   "quickstart/clients"
                 ]
               },
+              "migrating-to-1-0",
               "talk-to-us"
             ]
           },
@@ -98,6 +99,7 @@
               "spec/draft/basic/index",
               "spec/draft/basic/run-input",
               "spec/draft/basic/metadata",
+            "spec/draft/basic/capabilities",
               {
                 "group": "Event Patterns",
                 "pages": [

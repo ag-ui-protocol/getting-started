@@ -1,0 +1,10 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "move",
+      "from": "/draft",
+      "path": "/final"
+    }
+  ]
+}

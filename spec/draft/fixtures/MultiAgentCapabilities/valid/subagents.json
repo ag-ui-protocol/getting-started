@@ -1,0 +1,13 @@
+{
+  "supported": true,
+  "delegation": true,
+  "subagents": [
+    {
+      "name": "a"
+    },
+    {
+      "name": "b",
+      "description": "B"
+    }
+  ]
+}

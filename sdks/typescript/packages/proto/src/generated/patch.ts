@@ -10,6 +10,7 @@ import { Value } from "./google/protobuf/struct";
 
 export const protobufPackage = "ag_ui";
 
+/** The op discriminator of JsonPatchOperation. */
 export enum JsonPatchOperationType {
   ADD = 0,
   REMOVE = 1,
@@ -20,10 +21,30 @@ export enum JsonPatchOperationType {
   UNRECOGNIZED = -1,
 }
 
+/**
+ * A single RFC 6902 operation. Exactly one of the operation shapes must match,
+ * discriminated by op. Unlike the protocol's own objects, the operations are
+ * open: RFC 6902 section 4 requires members an operation does not define to be
+ * ignored rather than rejected, so a remove carrying a leftover value is a valid
+ * patch. Two of the RFC's rules are relations between values rather than shapes,
+ * so no static schema can express them and neither is checked here: a move whose
+ * from is a proper prefix of its path (section 4.4), and any operation whose
+ * pointer does not resolve in the target document. Both are the applier's to
+ * reject.
+ */
 export interface JsonPatchOperation {
+  /** Which operation this is. */
   op: JsonPatchOperationType;
+  /** Where to insert the value. */
   path: string;
-  from?: string | undefined;
+  /** Where the value is moved from. */
+  from?:
+    | string
+    | undefined;
+  /**
+   * The value to insert. Any JSON value, including null, which is a legitimate
+   * thing to add.
+   */
   value?: any | undefined;
 }
 

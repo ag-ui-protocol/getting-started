@@ -1,0 +1,21 @@
+{
+  "name": "triad-assembles-message",
+  "area": "streaming",
+  "description": "start/content/content/end assembles one message whose content is the deltas concatenated in arrival order",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make the reducer's TEXT_MESSAGE_CONTENT branch assign the delta instead of appending it",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-triad", "runId": "triad-r1", "protocolVersion": "1.0" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "triad-m1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "triad-m1", "delta": "Deltas " },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "triad-m1", "delta": "concatenate." },
+    { "type": "TEXT_MESSAGE_END", "messageId": "triad-m1" },
+    { "type": "RUN_FINISHED", "threadId": "t-triad", "runId": "triad-r1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [{ "id": "triad-m1", "role": "assistant", "content": "Deltas concatenate." }]
+  }
+}

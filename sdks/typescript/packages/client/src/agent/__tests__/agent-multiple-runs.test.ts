@@ -1,5 +1,16 @@
 import { AbstractAgent } from "../agent";
-import { BaseEvent, EventType, Message, RunAgentInput, TextMessageStartEvent, TextMessageContentEvent, TextMessageEndEvent, RunStartedEvent, RunFinishedEvent, ActivitySnapshotEvent } from "@ag-ui/core";
+import {
+  BaseEvent,
+  EventType,
+  Message,
+  RunAgentInput,
+  TextMessageStartEvent,
+  TextMessageContentEvent,
+  TextMessageEndEvent,
+  RunStartedEvent,
+  RunFinishedEvent,
+  ActivitySnapshotEvent,
+} from "@ag-ui/core";
 import { Observable, of } from "rxjs";
 
 describe("AbstractAgent multiple runs", () => {
@@ -44,6 +55,8 @@ describe("AbstractAgent multiple runs", () => {
       } as TextMessageEndEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
     ];
 
@@ -80,6 +93,8 @@ describe("AbstractAgent multiple runs", () => {
       } as TextMessageEndEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
     ];
 
@@ -128,6 +143,8 @@ describe("AbstractAgent multiple runs", () => {
         } as TextMessageEndEvent,
         {
           type: EventType.RUN_FINISHED,
+          threadId: "test-thread",
+          runId: "test-run",
         } as RunFinishedEvent,
       ];
 
@@ -147,7 +164,7 @@ describe("AbstractAgent multiple runs", () => {
 
     // Final verification
     expect(agent.messages.length).toBe(3);
-    expect(agent.messages.map(m => m.content)).toEqual(messages);
+    expect(agent.messages.map((m) => m.content)).toEqual(messages);
   });
 
   it("should handle multiple runs in a single event stream", async () => {
@@ -180,6 +197,8 @@ describe("AbstractAgent multiple runs", () => {
       } as TextMessageEndEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
       // Second run
       {
@@ -203,6 +222,8 @@ describe("AbstractAgent multiple runs", () => {
       } as TextMessageEndEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
     ];
 
@@ -258,6 +279,8 @@ describe("AbstractAgent multiple runs", () => {
       } as TextMessageEndEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
     ];
 
@@ -295,6 +318,8 @@ describe("AbstractAgent multiple runs", () => {
       } as ActivitySnapshotEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
     ];
 
@@ -326,6 +351,8 @@ describe("AbstractAgent multiple runs", () => {
       } as TextMessageEndEvent,
       {
         type: EventType.RUN_FINISHED,
+        threadId: "test-thread",
+        runId: "test-run",
       } as RunFinishedEvent,
     ];
 
@@ -333,6 +360,8 @@ describe("AbstractAgent multiple runs", () => {
     await agent.runAgent({ runId: "run-2" });
 
     expect(agent.messages.length).toBe(2);
-    expect(agent.messages.some((message) => message.role === "activity" && message.id === "activity-1")).toBe(true);
+    expect(
+      agent.messages.some((message) => message.role === "activity" && message.id === "activity-1"),
+    ).toBe(true);
   });
 });

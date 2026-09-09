@@ -1,0 +1,32 @@
+{
+  "name": "subagent-started-missing-name-fatal",
+  "area": "subagents",
+  "description": "SUBAGENT_STARTED without a name is fatal: the schema requires it, so its absence is a missing required field, not an optional a consumer may fill in",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "TWO changes, and it takes BOTH — either one alone leaves the other rejecting, and the fixture stays green (verified empirically): (1) make `name` optional on SubagentStartedEventSchema, which is what enforcement rejects on first, AND (2) delete the `typeof (event as { name?: unknown }).name !== \"string\"` guard in the SUBAGENT_STARTED case of verifyEvents, which rejects it independently of any schema because an in-process producer hands plain objects straight to the verifier. Defaulting the name when absent, in either place, has the same effect and must be done in both.",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-missing-name",
+      "runId": "r-subagent-missing-name",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "SUBAGENT_STARTED",
+      "subagentRunId": "s-subagent-missing-name-1"
+    },
+    {
+      "type": "SUBAGENT_FINISHED",
+      "subagentRunId": "s-subagent-missing-name-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-missing-name",
+      "runId": "r-subagent-missing-name"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "name"
+  }
+}

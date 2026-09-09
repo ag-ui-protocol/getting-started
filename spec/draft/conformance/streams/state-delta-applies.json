@@ -1,0 +1,35 @@
+{
+  "name": "state-delta-applies",
+  "area": "state",
+  "description": "a STATE_DELTA amends the snapshot that preceded it, applying its RFC 6902 operations in order",
+  "specPage": "/spec/draft/events/state",
+  "kill": "drop the `jsonpatch.applyPatch` call in the STATE_DELTA branch, leaving the prior state in place",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-state-delta-applies",
+      "runId": "state-delta-applies-r1"
+    },
+    {
+      "type": "STATE_SNAPSHOT",
+      "snapshot": { "plan": { "status": "open", "steps": ["outline"] } }
+    },
+    {
+      "type": "STATE_DELTA",
+      "delta": [
+        { "op": "add", "path": "/plan/steps/-", "value": "review" },
+        { "op": "replace", "path": "/plan/status", "value": "closed" }
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-state-delta-applies",
+      "runId": "state-delta-applies-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "state": { "plan": { "status": "closed", "steps": ["outline", "review"] } }
+  }
+}

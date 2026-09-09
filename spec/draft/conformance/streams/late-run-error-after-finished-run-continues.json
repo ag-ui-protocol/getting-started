@@ -1,0 +1,51 @@
+{
+  "name": "late-run-error-after-finished-run-continues",
+  "area": "lifecycle",
+  "description": "RUN_ERROR after RUN_FINISHED is admitted — a failure that surfaced after the run reported success — the failure is delivered to the application as an event, and everything applied before it is kept",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "remove the RUN_ERROR exemption from the `runFinished` guard in verifyEvents — the late failure is then rejected with `The run has already finished with 'RUN_FINISHED'`, the run ends failed and no RUN_ERROR reaches the application, so `outcome` and `runError` fail together",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-late-run-error",
+      "runId": "late-run-error-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "late-run-error-m-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "late-run-error-m-1",
+      "delta": "delivered before the failure"
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "late-run-error-m-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-late-run-error",
+      "runId": "late-run-error-r-1"
+    },
+    {
+      "type": "RUN_ERROR",
+      "message": "late-run-error: the transport failed while flushing"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "late-run-error-m-1",
+        "role": "assistant",
+        "content": "delivered before the failure"
+      }
+    ],
+    "runError": "late-run-error: the transport failed while flushing"
+  }
+}

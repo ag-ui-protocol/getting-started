@@ -4,9 +4,10 @@ import re
 from enum import Enum
 from uuid import UUID
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
+from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticSerializationError
-from typing import List, Any, Dict, NamedTuple, Union
+from typing import List, Any, Dict, Literal, NamedTuple, Optional, Union
 from collections.abc import Mapping
 from dataclasses import is_dataclass, asdict, fields
 from datetime import date, datetime
@@ -22,7 +23,6 @@ from ag_ui.core import (
     ToolCall as AGUIToolCall,
     FunctionCall as AGUIFunctionCall,
     TextInputContent,
-    BinaryInputContent,
     ImageInputContent,
     AudioInputContent,
     VideoInputContent,
@@ -33,6 +33,55 @@ from ag_ui.core import (
 from .types import State, SchemaKeys, LangGraphReasoning
 
 logger = logging.getLogger(__name__)
+
+try:
+    # The legacy binary content part left ``ag_ui.core`` in 1.0, but releases
+    # before it still export the class — and consumers pinning those releases
+    # PARSE into it, so the branches below reach it through isinstance(). Taking
+    # the SDK's class whenever there is one keeps that recognition working;
+    # shadowing it with a local twin would silently make every isinstance()
+    # false and route legacy items down the wrong branch.
+    from ag_ui.core import BinaryInputContent  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - depends on the installed SDK
+    # 1.0 and later, where the protocol no longer knows the shape.
+    #
+    # This keeps the module IMPORTABLE; it does not keep the legacy path alive.
+    # 1.0's ``InputContent`` is a discriminated union with no ``binary`` member,
+    # so a message carrying one is rejected at ``RunAgentInput`` validation —
+    # loudly, and upstream of this adapter. Nothing here can construct one
+    # either, since this module only reads already-parsed models. So under 1.0
+    # the two ``isinstance`` branches below are inert, and a legacy producer
+    # gets a validation error rather than a conversion. Reviving that path would
+    # mean normalising ``binary`` into a media part BEFORE validation, the way
+    # the TypeScript client's 0.0.47 middleware does — not here.
+    #
+    # ``extra="allow"`` matches the base the protocol used: the wire may carry
+    # members this shape does not name, and retaining them means a round trip
+    # through this twin does not quietly discard them. The branches below read
+    # only declared fields, so nothing here depends on it today.
+    class BinaryInputContent(BaseModel):
+        """The legacy binary content part, retired from ``ag_ui.core`` in 1.0."""
+
+        model_config = ConfigDict(
+            extra="allow",
+            populate_by_name=True,
+            alias_generator=to_camel,
+        )
+
+        type: Literal["binary"] = "binary"
+        mime_type: str
+        id: Optional[str] = None
+        url: Optional[str] = None
+        data: Optional[str] = None
+        filename: Optional[str] = None
+
+        @model_validator(mode="after")
+        def validate_source(self) -> "BinaryInputContent":
+            """Ensure at least one binary payload source is provided."""
+            if not any([self.id, self.url, self.data]):
+                raise ValueError("BinaryInputContent requires id, url, or data to be provided.")
+            return self
+
 
 # Type alias for the AG-UI multimodal content union
 AGUIContentItem = Union[

@@ -7,8 +7,7 @@ import {
   ImageInputPartSchema,
   InputContentDataSourceSchema,
   InputContentUrlSourceSchema,
-  BinaryInputContentSchema,
-} from "../types";
+} from "../schemas";
 
 const MODALITIES = ["image", "audio", "video", "document"] as const;
 
@@ -94,32 +93,6 @@ describe("Multimodal messages", () => {
     });
 
     expect(result.mimeType).toBe("application/pdf");
-  });
-
-  it("rejects binary content without payload source", () => {
-    const result = UserMessageSchema.safeParse({
-      id: "user_invalid",
-      role: "user" as const,
-      content: [{ type: "binary" as const, mimeType: "image/png" }],
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it("parses binary input with embedded data", () => {
-    const binary = BinaryInputContentSchema.parse({
-      type: "binary" as const,
-      mimeType: "image/png",
-      data: "base64",
-    });
-
-    expect(binary.data).toBe("base64");
-  });
-
-  it("requires binary payload source", () => {
-    expect(() =>
-      BinaryInputContentSchema.parse({ type: "binary" as const, mimeType: "image/png" }),
-    ).toThrow(/id, url, or data/);
   });
 
   describe.each(MODALITIES)("%s modality combinations", (modality) => {

@@ -4,7 +4,7 @@ import {
   tokenUsageFromAiSdkUsage,
   tokenUsageFromLangChainMetadata,
 } from "../token-usage";
-import { TokenUsageSchema } from "../events";
+import { TokenUsageSchema } from "../schemas";
 
 describe("tokenUsageFromAiSdkUsage", () => {
   it("maps AI-SDK v5 usage (keys already match TokenUsage)", () => {

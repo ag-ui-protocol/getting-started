@@ -1,0 +1,6 @@
+{
+  "type": "STATE_SNAPSHOT",
+  "snapshot": {
+    "a": 1
+  }
+}

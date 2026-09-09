@@ -1,0 +1,5 @@
+{
+  "keyword": "type",
+  "instanceLocation": "/execution/maxIterations",
+  "keywordLocation": "#/$defs/ExecutionCapabilities/properties/maxIterations/type"
+}

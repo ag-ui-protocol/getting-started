@@ -1,0 +1,36 @@
+{
+  "name": "first-chunk-missing-id-fatal",
+  "area": "streaming",
+  "description": "a first TEXT_MESSAGE_CHUNK without a messageId is a violation \u2014 a consumer must not invent an identifier",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make chunk expansion generate a messageId when the first chunk of a lane carries none",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-first-chunk-no-id",
+      "runId": "first-chunk-no-id-r1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "delta": "no message is open"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-first-chunk-no-id",
+      "runId": "first-chunk-no-id-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "First TEXT_MESSAGE_CHUNK must have a messageId"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. With no chunk stage there is nothing to require the first chunk's messageId, so the stream is accepted instead of rejected.",
+      "outcome": "completed",
+      "errorContains": "",
+      "messageCount": 0
+    }
+  }
+}

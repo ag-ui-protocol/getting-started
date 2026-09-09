@@ -7,7 +7,8 @@
           "$type": "text",
           "text": "Suggest me an Italian pasta recipe"
         }
-      ]
+      ],
+      "messageId": ""
     }
   ]
 }

@@ -16,6 +16,8 @@ features it uses:
   the other way.
 - **[Metadata](/spec/draft/basic/metadata)** — the open channel on everything,
   and how it merges.
+- **[Capabilities](/spec/draft/basic/capabilities)** — what an agent declares
+  about itself before a run, and what a declaration obliges.
 - **[Event patterns](/spec/draft/basic/patterns)** — the ways events compose
   into streams.
 - **[Transports](/spec/draft/basic/transports)** — how streams are framed and
@@ -63,13 +65,10 @@ key. It has its own page: [Metadata](/spec/draft/basic/metadata).
 
 An optional field that has no value MUST be omitted rather than sent as `null`.
 
-The rule binds a field whose schema does not itself admit `null` — which is
-most of them. Some fields carry arbitrary JSON, `rawEvent` and
-`RUN_FINISHED.result` among them, and for those `null` is a value the schema
-permits: a producer MAY send it, a consumer MUST preserve it, and nothing can
-distinguish it from an "absent" null because there is no such thing there.
-Whether a field admits `null` is a structural question, so the
-[schema](/spec/draft/schema) answers it.
+This applies to every optional field, including fields that carry arbitrary JSON
+such as `rawEvent`, `RUN_FINISHED.result`, and `forwardedProps`. A whole
+optional field set to `null` MUST be omitted. A required JSON payload can be
+`null`, for example `CUSTOM.value` or `STATE_SNAPSHOT.snapshot`.
 
 <Note>
   This is not a style preference. A consumer that must accept both spellings

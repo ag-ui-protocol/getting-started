@@ -7,7 +7,7 @@ For more information visit the [official documentation](https://docs.ag-ui.com/)
 ## Multimodal user messages
 
 ```ts
-import { UserMessageSchema } from "@ag-ui/core";
+import { UserMessageSchema } from "@ag-ui/core/schemas";
 
 const message = UserMessageSchema.parse({
   id: "user-123",

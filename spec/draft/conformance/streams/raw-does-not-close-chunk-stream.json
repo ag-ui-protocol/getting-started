@@ -1,0 +1,27 @@
+{
+  "name": "raw-does-not-close-chunk-stream",
+  "area": "streaming",
+  "description": "RAW stands aside from chunk assembly, so an id-less continuation after one still continues the open stream",
+  "specPage": "/spec/draft/basic/patterns/streaming",
+  "kill": "make RAW close the open chunk lane, the way CUSTOM does",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-raw-aside", "runId": "raw-aside-r1", "protocolVersion": "1.0" },
+    { "type": "TEXT_MESSAGE_CHUNK", "messageId": "raw-aside-m1", "role": "assistant", "delta": "Half " },
+    { "type": "RAW", "event": { "provider": "raw-aside", "kind": "heartbeat" } },
+    { "type": "TEXT_MESSAGE_CHUNK", "delta": "and half." },
+    { "type": "RUN_FINISHED", "threadId": "t-raw-aside", "runId": "raw-aside-r1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [{ "id": "raw-aside-m1", "role": "assistant", "content": "Half and half." }]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. The RAW aside cannot close a chunk stream that was never opened, so the rule this fixture states is untested on this lane.",
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

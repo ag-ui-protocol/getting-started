@@ -19,7 +19,9 @@ internal sealed class TextMessageBuilder
 
     public void AddTextStart(TextMessageStartEvent textStart)
     {
-        var role = AGUIChatMessageExtensions.MapChatRole(textStart.Role);
+        // An absent role means assistant: the schema states that in prose, since a
+        // validator treats its default as documentation rather than as behaviour.
+        var role = AGUIChatMessageExtensions.MapChatRole(textStart.Role ?? AGUIRoles.Assistant);
         if (_activeMessages.ContainsKey(textStart.MessageId))
         {
             throw new InvalidOperationException(

@@ -1,0 +1,61 @@
+{
+  "name": "unknown-part-in-message-list",
+  "area": "processing",
+  "description": "an unrecognised element inside a list is dropped and the list survives: a user message whose content array carries a future part kind between two text parts keeps both text parts",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "make stripAgainst's ZodArray branch propagate DROP outward instead of skipping the element — the whole message, and with it both conformant text parts, then disappears from the snapshot",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-unknown-part",
+      "runId": "r-unknown-part"
+    },
+    {
+      "type": "MESSAGES_SNAPSHOT",
+      "messages": [
+        {
+          "id": "m-unknown-part",
+          "role": "user",
+          "content": [
+            { "type": "text", "text": "before" },
+            {
+              "type": "hologram",
+              "source": { "type": "data", "value": "AAAA", "mimeType": "x/y" }
+            },
+            { "type": "text", "text": "after" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-unknown-part",
+      "runId": "r-unknown-part"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["/messages/0/content/1"],
+    "messageCount": 1,
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "text", "text": "before" },
+          { "type": "text", "text": "after" }
+        ]
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the known TS/.NET asymmetry, the same shape as unknown-outcome-stripped: .NET's input-content converter is a closed union, so an unrecognised part inside a message list is a fatal JsonException rather than stripped material — and being fatal, it is thrown rather than warned about. `warnings` is emptied only to displace the base expectation; `noWarnings` asserts that the rejection says nothing on the warning channel.",
+      "outcome": "failed",
+      "errorContains": "Unknown InputContent type",
+      "warnings": [],
+      "messageCount": 0,
+      "messages": [],
+      "noWarnings": true
+    }
+  }
+}

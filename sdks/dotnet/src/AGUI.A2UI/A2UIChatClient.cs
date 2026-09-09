@@ -373,8 +373,8 @@ public sealed class A2UIChatClient : DelegatingChatClient
         renderToolName = null;
         if (options is null ||
             !options.TryGetRunAgentInput(out RunAgentInput? input) ||
-            input.ForwardedProperties.ValueKind != JsonValueKind.Object ||
-            !input.ForwardedProperties.TryGetProperty("injectA2UITool", out JsonElement flag))
+            input.ForwardedProperties is not { ValueKind: JsonValueKind.Object } forwarded ||
+            !forwarded.TryGetProperty("injectA2UITool", out JsonElement flag))
         {
             return false;
         }

@@ -1,0 +1,47 @@
+{
+  "name": "activity-delta-missing-target-tolerated",
+  "area": "activity",
+  "description": "an ACTIVITY_DELTA naming a message that was never created is skipped and MUST NOT fail the run, and it invents no message either — the specification's SHOULD-warn is not asserted because no client emits one today",
+  "specPage": "/spec/draft/events/activity",
+  "kill": "make the ACTIVITY_DELTA branch throw on a missing target, or create the activity message from the delta instead of skipping",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-activity-delta-missing",
+      "runId": "activity-delta-missing-r1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "activity-delta-missing-m1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "activity-delta-missing-m1",
+      "delta": "searching"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "activity-delta-missing-m1" },
+    {
+      "type": "ACTIVITY_DELTA",
+      "messageId": "activity-delta-missing-never-created",
+      "activityType": "web_search",
+      "patch": [{ "op": "replace", "path": "/found", "value": 3 }]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-activity-delta-missing",
+      "runId": "activity-delta-missing-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "activity-delta-missing-m1",
+        "role": "assistant",
+        "content": "searching"
+      }
+    ]
+  }
+}

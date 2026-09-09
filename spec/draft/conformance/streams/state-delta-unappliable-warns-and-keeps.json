@@ -1,0 +1,60 @@
+{
+  "name": "state-delta-unappliable-warns-and-keeps",
+  "area": "state",
+  "description": "a well-formed patch whose path does not resolve warns, applies nothing at all, and does not fail the run",
+  "specPage": "/spec/draft/basic/patterns/snapshots",
+  "kill": "let the STATE_DELTA patch failure propagate instead of warning and keeping the prior state, or make it keep the partially applied document",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-state-delta-unappliable",
+      "runId": "state-delta-unappliable-r1"
+    },
+    {
+      "type": "STATE_SNAPSHOT",
+      "snapshot": {
+        "plan": {
+          "status": "open"
+        }
+      }
+    },
+    {
+      "type": "STATE_DELTA",
+      "delta": [
+        {
+          "op": "replace",
+          "path": "/plan/status",
+          "value": "closed"
+        },
+        {
+          "op": "replace",
+          "path": "/absent/deeper",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-state-delta-unappliable",
+      "runId": "state-delta-unappliable-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": [
+      "Failed to apply state patch"
+    ],
+    "state": {
+      "plan": {
+        "status": "open"
+      }
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the .NET client says nothing here, and cannot assert the state clause at all: it has no state store and no JSON Patch reducer, so STATE_* events reach a consumer only as raw pass-through and nothing ever attempts the patch that would fail. What this lane still holds .NET to is that the run stays alive and quiet. `warnings` is emptied only to displace the base expectation; `noWarnings` asserts the silence. Aligning .NET is tracked separately.",
+      "warnings": [],
+      "noWarnings": true
+    }
+  }
+}

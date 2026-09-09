@@ -1,0 +1,10 @@
+{
+  "type": "RUN_STARTED",
+  "threadId": "t1",
+  "runId": "r1",
+  "input": {
+    "threadId": "t1",
+    "runId": "r1",
+    "messages": []
+  }
+}

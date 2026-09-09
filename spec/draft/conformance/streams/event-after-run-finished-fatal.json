@@ -1,0 +1,29 @@
+{
+  "name": "event-after-run-finished-fatal",
+  "area": "lifecycle",
+  "description": "an ordinary event after RUN_FINISHED is fatal — only RUN_STARTED and RUN_ERROR may follow a closed run",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "drop the `runFinished` guard in verifyEvents so events keep flowing after a run closes",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-event-after-run-finished",
+      "runId": "event-after-run-finished-r-1",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-event-after-run-finished",
+      "runId": "event-after-run-finished-r-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "event-after-run-finished-m-1",
+      "role": "assistant"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "The run has already finished with 'RUN_FINISHED'"
+  }
+}

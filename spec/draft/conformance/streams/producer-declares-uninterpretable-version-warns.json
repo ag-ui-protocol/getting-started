@@ -1,0 +1,50 @@
+{
+  "name": "producer-declares-uninterpretable-version-warns",
+  "area": "versioning",
+  "description": "a declaration that is not a MAJOR.MINOR identifier cannot be compared, and is handled like a newer one: proceed, and warn",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "treat an uninterpretable protocolVersion as equal to the client's own, so it passes without a warning — or reject the run over it",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-uninterpretable-version",
+      "runId": "r-uninterpretable-version",
+      "protocolVersion": "draft"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-uninterpretable-version-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-uninterpretable-version-1",
+      "delta": "served anyway"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-uninterpretable-version-1" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-uninterpretable-version",
+      "runId": "r-uninterpretable-version"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["cannot interpret"],
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-uninterpretable-version-1",
+        "role": "assistant",
+        "content": "served anyway"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": ".NET does not implement the version-declaration comparison, so an uninterpretable protocolVersion is carried without ever being read and the replay is silent. `warnings` is emptied only to displace the base expectation; `noWarnings` is what asserts the silence. Alignment tracked separately.",
+      "warnings": [],
+      "noWarnings": true
+    }
+  }
+}

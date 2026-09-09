@@ -374,10 +374,10 @@ describe("transformChunks subagentRunId propagation", () => {
 });
 
 describe("a runtime null tag reads as the parent lane", () => {
-  // The schemas reject null, but this transform runs BEFORE verification in the
-  // agent pipeline, so a runtime null must not mint its own Map lane distinct
-  // from the parent's undefined — that produced overlapping starts for what is
-  // one parent stream.
+  // The schemas reject null, and a runtime null must not mint its own Map lane
+  // distinct from the parent's undefined — that produced overlapping starts for
+  // what is one parent stream. Lane KEYING therefore collapses null onto the
+  // parent; the emitted event is a separate question, below.
   it("null-tagged and untagged parent chunks share one lane", async () => {
     const events$ = from([
       {
@@ -401,9 +401,37 @@ describe("a runtime null tag reads as the parent lane", () => {
     );
     expect(firstEndIdx).toBeGreaterThan(-1);
     expect(firstEndIdx).toBeLessThan(secondStartIdx);
-    // And nothing re-emits the null.
-    for (const e of out) {
-      expect((e as { subagentRunId?: unknown }).subagentRunId).not.toBeNull();
-    }
+    // The null RIDES ALONG rather than being scrubbed. Spelling an absent owner
+    // as null is a violation the spec names, and this stage is not the one that
+    // judges it: enforcement runs before expansion on every pipeline in
+    // agent.ts, and after it when a middleware expands via runNext. Dropping it
+    // here made the violation fatal in the first case and invisible in the
+    // second, so which one a consumer hit decided whether a producer's bug was
+    // ever reported.
+    const opener = out.find(
+      (e) =>
+        e.type === EventType.TEXT_MESSAGE_START &&
+        (e as { messageId?: string }).messageId === "m1",
+    );
+    expect((opener as { subagentRunId?: unknown }).subagentRunId).toBeNull();
+  });
+
+  it("keeps a null tag fatal whichever stage reaches it first", async () => {
+    const chunk = {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      delta: "a",
+      subagentRunId: null,
+    } as unknown as BaseEvent;
+
+    // Expanded first (the runNext ordering), the null must survive expansion so
+    // the enforcement stage downstream can reject it.
+    const expanded = await firstValueFrom(
+      transformChunks(false)(from([chunk])).pipe(toArray()),
+    );
+
+    expect(
+      expanded.some((e) => (e as { subagentRunId?: unknown }).subagentRunId === null),
+    ).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { BaseEvent } from "@ag-ui/core";
+import { BaseEvent, omitOptionalNulls } from "@ag-ui/core";
 import * as proto from "@ag-ui/proto";
 import { preferredMediaTypes } from "./media-type";
 
@@ -26,7 +26,7 @@ export class EventEncoder {
   }
 
   encodeSSE(event: BaseEvent): string {
-    return `data: ${JSON.stringify(event)}\n\n`;
+    return `data: ${JSON.stringify(omitOptionalNulls(event, "Event"))}\n\n`;
   }
 
   encodeBinary(event: BaseEvent): Uint8Array {

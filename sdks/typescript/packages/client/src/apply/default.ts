@@ -1174,26 +1174,6 @@ export const defaultApplyEvents = (
           throw new Error("TOOL_CALL_CHUNK must be transformed before being applied");
         }
 
-        case EventType.THINKING_START: {
-          return emitUpdates();
-        }
-
-        case EventType.THINKING_END: {
-          return emitUpdates();
-        }
-
-        case EventType.THINKING_TEXT_MESSAGE_START: {
-          return emitUpdates();
-        }
-
-        case EventType.THINKING_TEXT_MESSAGE_CONTENT: {
-          return emitUpdates();
-        }
-
-        case EventType.THINKING_TEXT_MESSAGE_END: {
-          return emitUpdates();
-        }
-
         case EventType.REASONING_START: {
           const mutation = await runSubscribersWithMutation(
             subscribers,

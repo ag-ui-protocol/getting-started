@@ -42,7 +42,10 @@ export abstract class Middleware {
     next: AbstractAgent,
   ): Observable<EventWithState> {
     let currentMessages = structuredClone_(input.messages || []);
-    let currentState = structuredClone_(input.state || {});
+    // `=== undefined`, not truthiness: State is any JSON value, so `false`,
+    // `0`, `""` and `null` are states a run legitimately starts from. Only a
+    // genuinely absent state defaults to the empty object.
+    let currentState = structuredClone_(input.state === undefined ? {} : input.state);
 
     // Use a ReplaySubject to feed events one by one
     const eventSubject = new ReplaySubject<BaseEvent>();
@@ -50,14 +53,32 @@ export abstract class Middleware {
     // Set up defaultApplyEvents to process events
     const mutations$ = defaultApplyEvents(input, eventSubject, next, []);
 
-    // Subscribe to track state changes
-    mutations$.subscribe((mutation) => {
-      if (mutation.messages !== undefined) {
-        currentMessages = mutation.messages;
-      }
-      if (mutation.state !== undefined) {
-        currentState = mutation.state;
-      }
+    // Subscribe to track state changes.
+    //
+    // The `error` handler is deliberately empty, and deliberately present.
+    // This reducer is a PRIVATE bookkeeping copy: its only job is to keep
+    // `currentMessages`/`currentState` current for the events handed back
+    // below. No event reaching it today can make it fail — a producer-sent
+    // RUN_ERROR is applied like any other event, and the three sequences the
+    // reducer refuses outright are the unexpanded chunks, which `runNext`
+    // above has already expanded. The handler guards the shape of this
+    // subscription rather than a live failure: a next-only observer would make
+    // RxJS treat any future reducer failure as UNHANDLED, reported to
+    // `reportUnhandledError`, which rethrows from a macrotask and takes the
+    // host process down with an `uncaughtException` — from a bookkeeping copy
+    // whose failure the caller neither sees nor needs. The caller's own stream
+    // is a separate subscription that succeeds or fails on its own terms, and
+    // there is nothing left to track once this one has ended.
+    mutations$.subscribe({
+      next: (mutation) => {
+        if (mutation.messages !== undefined) {
+          currentMessages = mutation.messages;
+        }
+        if (mutation.state !== undefined) {
+          currentState = mutation.state;
+        }
+      },
+      error: () => {},
     });
 
     return this.runNext(input, next).pipe(

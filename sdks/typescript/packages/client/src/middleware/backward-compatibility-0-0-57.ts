@@ -34,7 +34,7 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
 
 /**
  * Client middleware that removes subagent-support additions when the REMOTE AGENT is
- * pre-subagent (its `maxVersion` <= 0.0.57; the shim is auto-inserted by that gate).
+ * pre-subagent (its `maxProtocolVersion` <= 0.0.57; the shim is auto-inserted by that gate).
  * The old party is the upstream agent, not the downstream consumer (the current client
  * supports subagents).
  *
@@ -60,14 +60,24 @@ function stripMessages(messages: MessageLike[]): MessageLike[] {
  * The subagent feature is purely additive, so this shim is a pure removal in both
  * directions; there is no field/event to translate (unlike 0.0.45's THINKING->REASONING).
  *
- * Who this actually fires for: `maxVersion` defaults to this library's own version, but
- * agent subclasses OVERRIDE it to declare the protocol level their backend speaks. Six
- * integrations do -- llama-index, pydantic-ai, ag2 and community/spring-ai at 0.0.39,
- * agno at 0.0.53, and crew-ai pinned at exactly 0.0.57, the version before subagents. So
- * this shim is live for all six today, and the client → agent strip is what carries the
- * weight: those backends predate subagents, so a replayed history or a stored thread
- * written by a newer client must not deliver them attribution they cannot interpret.
- * The agent → client strip is the defensive counterpart described above.
+ * Who this actually fires for: `maxProtocolVersion` defaults to this library's own
+ * version, which sits above every era threshold, so the shim is installed only for an
+ * agent subclass that OVERRIDES the ceiling to declare an older backend. As of this
+ * writing exactly ONE integration in this repository does:
+ * `integrations/community/spring-ai/typescript/src/index.ts`, pinned at 0.0.39.
+ *
+ * An earlier version of this note claimed six, naming llama-index, pydantic-ai, ag2,
+ * agno and crew-ai alongside it. That census was wrong, and three of those integrations
+ * now carry tests asserting the opposite -- llama-index's `multimodal-passthrough`,
+ * and crew-ai's and agno's `no-content-flattening`, each of which fails if the agent
+ * starts pinning a ceiling again. Do not trust this paragraph either: it is a snapshot
+ * of code that lives outside this package and nothing keeps it honest. Re-check with
+ * `grep -rn "maxProtocolVersion\|maxVersion" integrations` before relying on it.
+ *
+ * Where the shim IS installed, the client → agent strip carries the weight: those
+ * backends predate subagents, so a replayed history or a stored thread written by a
+ * newer client must not deliver them attribution they cannot interpret. The
+ * agent → client strip is the defensive counterpart described above.
  */
 export class BackwardCompatibility_0_0_57 extends Middleware {
   private warnDroppedLifecycleEvent(eventType: string) {

@@ -17,26 +17,24 @@ import {
   createTextMessageContentEvent,
   createTextMessageEndEvent,
   createTextMessageStartEvent,
-  createThinkingEndEvent,
-  createThinkingStartEvent,
-  createThinkingTextMessageContentEvent,
-  createThinkingTextMessageEndEvent,
-  createThinkingTextMessageStartEvent,
   createToolCallArgsEvent,
   createToolCallChunkEvent,
   createToolCallEndEvent,
   createToolCallResultEvent,
   createToolCallStartEvent,
 } from "../event-factories";
-import { EventType } from "../events";
+import { EventType } from "../index";
 
 describe("event factories", () => {
-  it("creates TEXT_MESSAGE_START with default assistant role", () => {
+  it("creates TEXT_MESSAGE_START without materialising the role default", () => {
     const event = createTextMessageStartEvent({ messageId: "msg-1" });
 
     expect(event.type).toBe(EventType.TEXT_MESSAGE_START);
     expect(event.messageId).toBe("msg-1");
-    expect(event.role).toBe("assistant");
+    // An absent role MEANS assistant — the schema states that in prose, and a
+    // validator treats a default as documentation rather than behaviour, so
+    // nothing invents the value.
+    expect(event.role).toBeUndefined();
   });
 
   it("creates TEXT_MESSAGE_START with custom role", () => {
@@ -72,7 +70,7 @@ describe("event factories", () => {
     });
     expect(event.type).toBe(EventType.TEXT_MESSAGE_START);
     expect(event.messageId).toBe("msg-1");
-    expect(event.role).toBe("assistant");
+    expect(event.role).toBeUndefined();
     expect(event.name).toBe("research-agent");
   });
 
@@ -109,17 +107,6 @@ describe("event factories", () => {
     expect(event.messageId).toBeUndefined();
   });
 
-  it("creates THINKING_TEXT_MESSAGE_START/CONTENT/END", () => {
-    const start = createThinkingTextMessageStartEvent({});
-    const content = createThinkingTextMessageContentEvent({ delta: "thinking…" });
-    const end = createThinkingTextMessageEndEvent({});
-
-    expect(start.type).toBe(EventType.THINKING_TEXT_MESSAGE_START);
-    expect(content.type).toBe(EventType.THINKING_TEXT_MESSAGE_CONTENT);
-    expect(content.delta).toBe("thinking…");
-    expect(end.type).toBe(EventType.THINKING_TEXT_MESSAGE_END);
-  });
-
   it("creates TOOL_CALL_START/ARGS/END/CHUNK/RESULT", () => {
     const start = createToolCallStartEvent({
       toolCallId: "tc-1",
@@ -147,15 +134,6 @@ describe("event factories", () => {
     expect(end.type).toBe(EventType.TOOL_CALL_END);
     expect(result.role).toBe("tool");
     expect(result.content).toBe('{"ok":true}');
-  });
-
-  it("creates THINKING_START/END", () => {
-    const start = createThinkingStartEvent({ title: "working" });
-    const end = createThinkingEndEvent({});
-
-    expect(start.type).toBe(EventType.THINKING_START);
-    expect(start.title).toBe("working");
-    expect(end.type).toBe(EventType.THINKING_END);
   });
 
   it("creates STATE_SNAPSHOT and STATE_DELTA", () => {
@@ -195,7 +173,8 @@ describe("event factories", () => {
     });
 
     expect(snapshot.type).toBe(EventType.ACTIVITY_SNAPSHOT);
-    expect(snapshot.replace).toBe(true);
+    // Absent means replace-the-snapshot; the prose default is not materialised.
+    expect(snapshot.replace).toBeUndefined();
     expect(delta.type).toBe(EventType.ACTIVITY_DELTA);
     expect(delta.patch[0].path).toBe("/steps/0");
   });

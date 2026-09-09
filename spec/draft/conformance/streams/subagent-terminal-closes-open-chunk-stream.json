@@ -1,0 +1,74 @@
+{
+  "name": "subagent-terminal-closes-open-chunk-stream",
+  "area": "subagents",
+  "description": "a subagent's terminal closes the chunk stream still open in its own lane, so the run completes cleanly with the delegated message assembled",
+  "specPage": "/spec/draft/events/subagents",
+  "kill": "move `SUBAGENT_FINISHED`/`SUBAGENT_ERROR` in chunks/transform.ts out of the lane-closing case and into the pass-through group (`return [event]`). Nothing about the assembled message changes — the run terminal closes every lane anyway, so `messageCount` and `messages` stay green — and the ONLY observable difference is where the synthesized TEXT_MESSAGE_END lands in the delivered stream: before its owner's terminal when the rule holds, after it when it does not. That ordering is the whole assertion, and it is what the `eventTypes` list in the typescript override pins.",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-subagent-terminal-chunk",
+      "runId": "r-subagent-terminal-chunk",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "SUBAGENT_STARTED",
+      "subagentRunId": "s-subagent-terminal-chunk-1",
+      "name": "summariser"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "messageId": "m-subagent-terminal-chunk-1",
+      "role": "assistant",
+      "delta": "half ",
+      "subagentRunId": "s-subagent-terminal-chunk-1"
+    },
+    {
+      "type": "TEXT_MESSAGE_CHUNK",
+      "delta": "assembled",
+      "subagentRunId": "s-subagent-terminal-chunk-1"
+    },
+    {
+      "type": "SUBAGENT_FINISHED",
+      "subagentRunId": "s-subagent-terminal-chunk-1"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-subagent-terminal-chunk",
+      "runId": "r-subagent-terminal-chunk"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-subagent-terminal-chunk-1",
+        "role": "assistant",
+        "content": "half assembled",
+        "subagentRunId": "s-subagent-terminal-chunk-1"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "typescript": {
+      "intentional": "The rule this fixture states is observable ONLY in the order events reach application code: the run terminal closes every lane regardless, so the assembled message is identical whether or not the subagent's terminal closed its lane, and the delivered order is the only witness. That witness exists only where chunk expansion does, and .NET does not expand chunks at all (see the dotnet override below) — so the list lives here rather than in `expect`, which stays lane-neutral.",
+      "eventTypes": [
+        "RUN_STARTED",
+        "SUBAGENT_STARTED",
+        "TEXT_MESSAGE_START",
+        "TEXT_MESSAGE_CONTENT",
+        "TEXT_MESSAGE_CONTENT",
+        "TEXT_MESSAGE_END",
+        "SUBAGENT_FINISHED",
+        "RUN_FINISHED"
+      ]
+    },
+    "dotnet": {
+      "intentional": "GAP, not a design difference: EventStreamConverter has no case for TEXT_MESSAGE_CHUNK or TOOL_CALL_CHUNK, so a chunk stream falls through to the pass-through branch. Nothing is expanded into a message and none of the chunk-stream rules are enforced. Pinned here so the gap cannot widen or close unnoticed; alignment tracked separately. No chunk stream is opened, so no subagent terminal closes one and no message is assembled.",
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

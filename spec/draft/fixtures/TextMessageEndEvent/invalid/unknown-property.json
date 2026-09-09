@@ -1,0 +1,5 @@
+{
+  "type": "TEXT_MESSAGE_END",
+  "messageId": "msg_1",
+  "somethingNewer": true
+}

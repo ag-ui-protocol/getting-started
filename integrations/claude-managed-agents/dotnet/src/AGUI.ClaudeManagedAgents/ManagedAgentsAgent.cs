@@ -583,7 +583,12 @@ public sealed class ManagedAgentsAgent
 
         foreach (var tool in clientTools ?? [])
         {
-            var custom = ManagedAgentsCustomTools.CustomToolFrom(tool.Name, tool.Description, tool.Parameters);
+            // Parameters is optional on the protocol's Tool, and a tool that
+            // declares none is a tool that takes none: an undefined element is
+            // not an object, which InputSchemaFrom already reads as the empty
+            // object schema.
+            var custom = ManagedAgentsCustomTools.CustomToolFrom(
+                tool.Name, tool.Description, tool.Parameters ?? default);
             tools.Set(ManagedAgentsCustomTools.NameOf(custom) ?? ManagedAgentsCustomTools.NormalizeToolName(tool.Name), custom);
         }
 

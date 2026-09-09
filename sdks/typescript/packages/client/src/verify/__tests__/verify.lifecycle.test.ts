@@ -115,7 +115,11 @@ describe("verifyEvents lifecycle", () => {
       type: EventType.TEXT_MESSAGE_END,
       messageId: "1",
     } as TextMessageEndEvent);
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Send another event after RUN_FINISHED (should be rejected)
     source$.next({
@@ -161,7 +165,11 @@ describe("verifyEvents lifecycle", () => {
       type: EventType.TEXT_MESSAGE_END,
       messageId: "1",
     } as TextMessageEndEvent);
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
     source$.next({
       type: EventType.RUN_ERROR,
       message: "Test error",
@@ -300,7 +308,11 @@ describe("verifyEvents lifecycle", () => {
       type: EventType.TOOL_CALL_END,
       toolCallId: "t1",
     } as ToolCallEndEvent);
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source
     source$.complete();

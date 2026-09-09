@@ -1,0 +1,5 @@
+{
+  "keyword": "maximum",
+  "instanceLocation": "/maxIterations",
+  "keywordLocation": "#/properties/maxIterations/maximum"
+}

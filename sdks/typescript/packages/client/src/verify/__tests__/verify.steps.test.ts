@@ -170,7 +170,11 @@ describe("verifyEvents steps", () => {
     // Intentionally not finishing step2
 
     // Try to end the run with active steps
-    source$.next({ type: EventType.RUN_FINISHED } as RunFinishedEvent);
+    source$.next({
+      type: EventType.RUN_FINISHED,
+      threadId: "test",
+      runId: "test",
+    } as RunFinishedEvent);
 
     // Complete the source and wait a bit for processing
     source$.complete();

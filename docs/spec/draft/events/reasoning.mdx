@@ -42,13 +42,25 @@ matched by `messageId` — and `REASONING_MESSAGE_CHUNK` is the compact spelling
 whose first chunk MUST carry `messageId`. The pattern's rules apply exactly as
 for text messages.
 
-<Note>
-  A consumer is not yet required to *detect* a violation of the streaming rules
-  on reasoning messages or spans. The reference implementation verifies the
-  open/close discipline for text messages and tool calls but not for reasoning,
-  so requiring detection here would declare a shipped consumer non-conformant.
-  A producer that breaks the rules is non-conformant either way.
-</Note>
+A consumer MUST detect a violation of that discipline and fail the run, on
+spans and on reasoning messages alike:
+
+- A `REASONING_MESSAGE_CONTENT` or `REASONING_MESSAGE_END` naming a message
+  nothing opened has no referent, and a consumer MUST NOT invent the message
+  an orphaned fragment names. The same shape is rejected for a text message;
+  reasoning is not the exception.
+- A `REASONING_END` naming a span nothing opened is rejected the same way, as
+  is a `REASONING_START` reopening a span already open.
+- A `REASONING_MESSAGE_START` naming a reasoning message that is already open
+  is rejected too — the message must be closed with `REASONING_MESSAGE_END`
+  before its `messageId` is used again. A span and the message inside it MAY
+  share an identifier, so each is checked against its own open set.
+- A span or a reasoning message still open when the run finishes fails the
+  run.
+
+Spans and reasoning messages are separate namespaces: a `REASONING_START` opens
+a span and no message, so a fragment naming a span's `messageId` is orphaned
+like any other.
 
 ### `REASONING_ENCRYPTED_VALUE`
 

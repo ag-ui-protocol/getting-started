@@ -1,0 +1,5 @@
+{
+  "type": "TOOL_CALL_CHUNK",
+  "toolCallId": "c1",
+  "parentMessageId": null
+}

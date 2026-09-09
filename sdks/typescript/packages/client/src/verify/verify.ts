@@ -18,13 +18,27 @@ export const verifyEvents =
     // ACTIVITY_DELTA, so they need an owner tracked for them just like text messages —
     // see `owners.activity`. This set only records that the activity exists, which is
     // what tells a replacing snapshot from a first one.
-    // Reasoning messages are opened by REASONING_START / REASONING_MESSAGE_START and
-    // continued by REASONING_MESSAGE_CONTENT/END and REASONING_END, all keyed by the same
-    // id — the last ID-keyed entity that had no owner check, so an s2 delta could be
-    // appended to the reasoning message minted for s1. REASONING_ENCRYPTED_VALUE also
-    // continues a reasoning message, but it is keyed by `entityId` and its `subtype` may
-    // route it to a different bucket entirely.
-    const activeReasoning = new Set<string>(); // open reasoning IDs
+    // Reasoning has TWO bracketed entities, not one. A SPAN is opened by
+    // REASONING_START and closed by REASONING_END; a reasoning MESSAGE is opened by
+    // REASONING_MESSAGE_START and closed by REASONING_MESSAGE_END. The specification
+    // says the span's identifier "namespaces nothing" and the messages inside carry
+    // their own ids, so the two are tracked separately — which also means one id may
+    // legitimately name both, as several producers spell it, without either opener
+    // reading as a re-open of the other.
+    //
+    // Both sets are membership-only ("is this still open?"). A single shared set was
+    // kept before, and never read by anything: reasoning was the one streaming entity
+    // whose open/close discipline went unverified, so a content event with no opener,
+    // a message never closed, and a span closed without being opened all passed.
+    // Ownership is separate again and lives in `owners.reasoning` below, deliberately
+    // shared across both kinds so a span and the message inside it cannot be claimed
+    // by different producers.
+    //
+    // REASONING_ENCRYPTED_VALUE also continues a reasoning message, but it is keyed by
+    // `entityId`, its `subtype` may route it to a different bucket entirely, and it
+    // opens and closes nothing — so it is checked for ownership only.
+    const activeReasoningSpans = new Set<string>(); // open REASONING_START ids
+    const activeReasoningMessages = new Set<string>(); // open REASONING_MESSAGE_START ids
     // Owners, retained for the whole run, in one bucket PER ENTITY KIND. An id is only
     // unique within a kind: a message and a tool call may both be called "x" with no
     // conflict. A single bucket let the tool-call write overwrite the message's owner, so
@@ -86,15 +100,14 @@ export const verifyEvents =
     // attribution-only producers (which tag events but never send SUBAGENT_*) stay
     // valid. Cleared per run, like every other map here.
     const closedSubagents = new Set<string>();
-    let activeThinkingStep = false;
-    let activeThinkingStepMessage = false;
     let runStarted = false; // Track if a run has started
 
     // Function to reset state for a new run
     const resetRunState = () => {
       activeMessages.clear();
       activeToolCalls.clear();
-      activeReasoning.clear();
+      activeReasoningSpans.clear();
+      activeReasoningMessages.clear();
       owners.message.clear();
       owners.toolCall.clear();
       owners.activity.clear();
@@ -102,8 +115,6 @@ export const verifyEvents =
       activeSteps.clear();
       activeSubagents.clear();
       closedSubagents.clear();
-      activeThinkingStep = false;
-      activeThinkingStepMessage = false;
       runFinished = false;
       runError = false;
       runStarted = true;
@@ -678,6 +689,24 @@ export const verifyEvents =
           case EventType.REASONING_START:
           case EventType.REASONING_MESSAGE_START: {
             const messageId = (event.messageId as string);
+            const isSpan = eventType === EventType.REASONING_START;
+            const open = isSpan ? activeReasoningSpans : activeReasoningMessages;
+
+            // "A producer MUST NOT open a span whose messageId is already open", and
+            // the streaming pattern says the same of a message. Checked against the
+            // opener's OWN set: a span and the message inside it may share an id, so
+            // one set for both would have rejected the canonical shape.
+            if (open.has(messageId)) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    isSpan
+                      ? `Cannot send 'REASONING_START' event: A reasoning span with ID '${messageId}' is already in progress. Complete it with 'REASONING_END' first.`
+                      : `Cannot send 'REASONING_MESSAGE_START' event: A reasoning message with ID '${messageId}' is already in progress. Complete it with 'REASONING_MESSAGE_END' first.`,
+                  ),
+              );
+            }
+
             // First writer records the owner. REASONING_START brackets the outer
             // reasoning and REASONING_MESSAGE_START the inner message, usually under the
             // same id, so whichever arrives first establishes it.
@@ -692,7 +721,7 @@ export const verifyEvents =
               );
               if (subErr) return throwError(() => subErr);
             }
-            activeReasoning.add(messageId);
+            open.add(messageId);
             // Only the first writer records the owner, and the owner outlives the close --
             // so an untagged reopen after REASONING_END does not hand the reasoning back
             // to the parent either.
@@ -706,6 +735,23 @@ export const verifyEvents =
           case EventType.REASONING_MESSAGE_END:
           case EventType.REASONING_END: {
             const messageId = (event.messageId as string);
+            const isSpan = eventType === EventType.REASONING_END;
+            const open = isSpan ? activeReasoningSpans : activeReasoningMessages;
+
+            // A continuation must name something that is open, exactly as for text
+            // messages and tool calls. Without this the reducer was left to invent a
+            // message for an orphaned fragment, or to append to one that had closed.
+            if (!open.has(messageId)) {
+              return throwError(
+                () =>
+                  new AGUIError(
+                    isSpan
+                      ? `Cannot send 'REASONING_END' event: No active reasoning span found with ID '${messageId}'. A 'REASONING_START' event must be sent first.`
+                      : `Cannot send '${eventType}' event: No active reasoning message found with ID '${messageId}'. Start a reasoning message with 'REASONING_MESSAGE_START' first.`,
+                  ),
+              );
+            }
+
             const subErr = subagentTagError(
               eventType,
               (event.subagentRunId as string | undefined),
@@ -714,14 +760,12 @@ export const verifyEvents =
               messageId,
             );
             if (subErr) return throwError(() => subErr);
-            // Only REASONING_END closes the reasoning. Clearing at REASONING_MESSAGE_END
-            // instead had also dropped the owner, which left the outer close with nothing
-            // to compare against, so `REASONING_END(r, s2)` after an s1 message was
-            // accepted. What is dropped here is only the OPEN flag —
-            // `owners.reasoning` is retained for the rest of the run, so a later
-            // REASONING_ENCRYPTED_VALUE naming this id still has an owner to check.
-            if (eventType === EventType.REASONING_END) {
-              activeReasoning.delete(messageId);
+            // Each terminal closes only its own entity. What is dropped here is only
+            // the OPEN flag — `owners.reasoning` is retained for the rest of the run,
+            // so a later REASONING_ENCRYPTED_VALUE naming this id still has an owner to
+            // check, and an untagged reopen cannot hand the id back to the parent.
+            if (eventType === EventType.REASONING_END || eventType === EventType.REASONING_MESSAGE_END) {
+              open.delete(messageId);
             }
             return of(event);
           }
@@ -923,6 +967,27 @@ export const verifyEvents =
               );
             }
 
+            // Check that all reasoning messages and spans are finished before run ends
+            if (activeReasoningMessages.size > 0) {
+              const unfinished = Array.from(activeReasoningMessages.keys()).join(", ");
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'RUN_FINISHED' while reasoning messages are still active: ${unfinished}`,
+                  ),
+              );
+            }
+
+            if (activeReasoningSpans.size > 0) {
+              const unfinished = Array.from(activeReasoningSpans.keys()).join(", ");
+              return throwError(
+                () =>
+                  new AGUIError(
+                    `Cannot send 'RUN_FINISHED' while reasoning spans are still active: ${unfinished}`,
+                  ),
+              );
+            }
+
             // Check that all tool calls are finished before run ends
             if (activeToolCalls.size > 0) {
               const unfinishedToolCalls = Array.from(activeToolCalls.keys()).join(", ");
@@ -956,90 +1021,6 @@ export const verifyEvents =
           }
 
           case EventType.CUSTOM: {
-            return of(event);
-          }
-
-          // Text message flow
-          case EventType.THINKING_TEXT_MESSAGE_START: {
-            if (!activeThinkingStep) {
-              return throwError(
-                () =>
-                  new AGUIError(
-                    `Cannot send 'THINKING_TEXT_MESSAGE_START' event: A thinking step is not in progress. Create one with 'THINKING_START' first.`,
-                  ),
-              );
-            }
-            // Can't start a message if one is already in progress
-            if (activeThinkingStepMessage) {
-              return throwError(
-                () =>
-                  new AGUIError(
-                    `Cannot send 'THINKING_TEXT_MESSAGE_START' event: A thinking message is already in progress. Complete it with 'THINKING_TEXT_MESSAGE_END' first.`,
-                  ),
-              );
-            }
-
-            activeThinkingStepMessage = true;
-            return of(event);
-          }
-
-          case EventType.THINKING_TEXT_MESSAGE_CONTENT: {
-            // Must be in a message and IDs must match
-            if (!activeThinkingStepMessage) {
-              return throwError(
-                () =>
-                  new AGUIError(
-                    `Cannot send 'THINKING_TEXT_MESSAGE_CONTENT' event: No active thinking message found. Start a message with 'THINKING_TEXT_MESSAGE_START' first.`,
-                  ),
-              );
-            }
-
-            return of(event);
-          }
-
-          case EventType.THINKING_TEXT_MESSAGE_END: {
-            // Must be in a message and IDs must match
-            if (!activeThinkingStepMessage) {
-              return throwError(
-                () =>
-                  new AGUIError(
-                    `Cannot send 'THINKING_TEXT_MESSAGE_END' event: No active thinking message found. A 'THINKING_TEXT_MESSAGE_START' event must be sent first.`,
-                  ),
-              );
-            }
-
-            // Reset message state
-            activeThinkingStepMessage = false;
-            return of(event);
-          }
-
-          case EventType.THINKING_START: {
-            if (activeThinkingStep) {
-              return throwError(
-                () =>
-                  new AGUIError(
-                    `Cannot send 'THINKING_START' event: A thinking step is already in progress. End it with 'THINKING_END' first.`,
-                  ),
-              );
-            }
-
-            activeThinkingStep = true;
-            return of(event);
-          }
-
-          case EventType.THINKING_END: {
-            // Must be in a message and IDs must match
-            if (!activeThinkingStep) {
-              return throwError(
-                () =>
-                  new AGUIError(
-                    `Cannot send 'THINKING_END' event: No active thinking step found. A 'THINKING_START' event must be sent first.`,
-                  ),
-              );
-            }
-
-            // Reset message state
-            activeThinkingStep = false;
             return of(event);
           }
 

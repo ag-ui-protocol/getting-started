@@ -1,4 +1,4 @@
-import { BaseEvent, EventSchemas } from "@ag-ui/core";
+import { BaseEvent } from "@ag-ui/core";
 import { Subject, ReplaySubject, Observable } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
 import { parseSSEStream } from "./sse";
@@ -42,7 +42,7 @@ export const transformHttpEventStream = (
         // Choose parser based on content type
         if (contentType === proto.AGUI_MEDIA_TYPE) {
           // Use protocol buffer parser
-          parseProtoStream(bufferSubject).subscribe({
+          parseProtoStream(bufferSubject, log).subscribe({
             next: (event) => eventSubject.next(event),
             error: (err) => eventSubject.error(err),
             complete: () => eventSubject.complete(),
@@ -51,17 +51,33 @@ export const transformHttpEventStream = (
           // Use SSE JSON parser for all other cases
           parseSSEStream(bufferSubject, log).subscribe({
             next: (json) => {
-              try {
-                const parsedEvent = EventSchemas.parse(json);
-                log?.event("HTTP", "Event validated:", parsedEvent, {
-                  type: parsedEvent.type,
-                  valid: true,
-                });
-                eventSubject.next(parsedEvent as BaseEvent);
-              } catch (err) {
+              // No schema enforcement here: validation runs AFTER the
+              // middleware chain (the enforcement stage in the agent
+              // pipeline), so a translator for a deprecated or unrecognised
+              // event stays reachable. The transport only requires the one
+              // thing nothing downstream can work without: a string type.
+              // `null`, a number, a string and an array are all valid JSON
+              // documents, and `JSON.parse` hands them on as readily as an
+              // object. Reading `.type` off `null` throws inside this `next`
+              // handler, where the throw is reported to the host rather than
+              // to `eventSubject.error` — the run would then RESOLVE, claiming
+              // success for a stream nobody read. So the shape is checked
+              // before anything is read off it.
+              if (typeof json !== "object" || json === null || Array.isArray(json)) {
+                const err = new Error("Invalid event: the frame is not a JSON object.");
                 log?.event("HTTP", "Event invalid:", { json, error: String(err) });
                 eventSubject.error(err);
+                return;
               }
+              const record = json as { type?: unknown };
+              if (typeof record.type !== "string" || record.type.length === 0) {
+                const err = new Error("Invalid event: the frame carries no event type.");
+                log?.event("HTTP", "Event invalid:", { json, error: String(err) });
+                eventSubject.error(err);
+                return;
+              }
+              log?.event("HTTP", "Event received:", json, { type: record.type });
+              eventSubject.next(json as BaseEvent);
             },
             error: (err) => {
               if ((err as DOMException)?.name === "AbortError") {

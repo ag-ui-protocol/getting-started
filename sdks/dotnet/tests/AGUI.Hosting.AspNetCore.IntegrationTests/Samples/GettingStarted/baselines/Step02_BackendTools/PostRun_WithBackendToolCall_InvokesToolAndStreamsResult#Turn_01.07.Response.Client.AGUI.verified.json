@@ -6,9 +6,9 @@
   },
   {
     "type": "TOOL_CALL_START",
-    "parentMessageId": "",
     "toolCallId": "call_Id_1",
     "toolCallName": "SearchRestaurants",
+    "parentMessageId": "",
     "rawEvent": {
       "authorName": null,
       "role": "assistant",

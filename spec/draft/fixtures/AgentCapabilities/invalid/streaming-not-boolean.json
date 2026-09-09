@@ -1,0 +1,5 @@
+{
+  "transport": {
+    "streaming": "yes"
+  }
+}

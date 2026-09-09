@@ -1,0 +1,10 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "copy",
+      "from": "/template",
+      "path": "/instance"
+    }
+  ]
+}

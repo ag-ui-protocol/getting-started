@@ -6,9 +6,9 @@
   },
   {
     "type": "TOOL_CALL_START",
-    "parentMessageId": "",
     "toolCallId": "call_Id_1",
     "toolCallName": "get_user_location",
+    "parentMessageId": "",
     "rawEvent": {
       "role": "assistant",
       "contents": [
@@ -96,9 +96,9 @@
   },
   {
     "type": "TOOL_CALL_START",
-    "parentMessageId": "",
     "toolCallId": "call_Id_2",
     "toolCallName": "get_weather",
+    "parentMessageId": "",
     "rawEvent": {
       "role": "assistant",
       "contents": [

@@ -1,0 +1,38 @@
+{
+  "name": "state-snapshot-replaces",
+  "area": "state",
+  "description": "a second STATE_SNAPSHOT replaces the state wholesale — nothing of the first survives, and state is any JSON value",
+  "specPage": "/spec/draft/events/state",
+  "kill": "make STATE_SNAPSHOT merge its snapshot into the current state (`state = { ...state, ...snapshot }`) instead of assigning it",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-state-snapshot-replaces",
+      "runId": "state-snapshot-replaces-r1"
+    },
+    {
+      "type": "STATE_SNAPSHOT",
+      "snapshot": { "phase": "drafting", "steps": ["outline", "draft"] }
+    },
+    { "type": "STATE_SNAPSHOT", "snapshot": ["only-this"] },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-state-snapshot-replaces",
+      "runId": "state-snapshot-replaces-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STATE_SNAPSHOT",
+      "RUN_FINISHED"
+    ],
+    "noWarnings": true,
+    "state": ["only-this"],
+    "eventPaths": {
+      "2.snapshot": ["only-this"]
+    }
+  }
+}

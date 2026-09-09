@@ -1,0 +1,80 @@
+{
+  "name": "messages-snapshot-reconciles-by-id",
+  "area": "state",
+  "description": "MESSAGES_SNAPSHOT reconciles by id: a message it carries replaces the consumer's copy, and one the consumer holds that it omits is dropped",
+  "specPage": "/spec/draft/events/state#messages_snapshot",
+  "kill": "make MESSAGES_SNAPSHOT preserve consumer messages the snapshot omits, or append its messages instead of replacing the copies with the same id",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-messages-snapshot-reconciles",
+      "runId": "messages-snapshot-reconciles-r1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "messages-snapshot-reconciles-a",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "messages-snapshot-reconciles-a",
+      "delta": "first draft"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "messages-snapshot-reconciles-a" },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "messages-snapshot-reconciles-b",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "messages-snapshot-reconciles-b",
+      "delta": "retracted"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "messages-snapshot-reconciles-b" },
+    {
+      "type": "MESSAGES_SNAPSHOT",
+      "messages": [
+        {
+          "id": "messages-snapshot-reconciles-a",
+          "role": "assistant",
+          "content": "first draft, corrected"
+        }
+      ]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-messages-snapshot-reconciles",
+      "runId": "messages-snapshot-reconciles-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "messages-snapshot-reconciles-a",
+        "role": "assistant",
+        "content": "first draft, corrected"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client does not reconcile its conversation against MESSAGES_SNAPSHOT: the event passes through as RawRepresentation and the messages assembled from the stream stand unchanged, so the superseded copy keeps its first text and the omitted message is not dropped. Alignment tracked separately.",
+      "messageCount": 2,
+      "messages": [
+        {
+          "id": "messages-snapshot-reconciles-a",
+          "role": "assistant",
+          "content": "first draft"
+        },
+        {
+          "id": "messages-snapshot-reconciles-b",
+          "role": "assistant",
+          "content": "retracted"
+        }
+      ]
+    }
+  }
+}

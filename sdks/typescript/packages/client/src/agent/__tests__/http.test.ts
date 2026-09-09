@@ -258,10 +258,11 @@ describe("HttpAgent", () => {
 
     expect(customFetch).toHaveBeenCalledWith(
       "https://api.example.com/v1/chat",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
+      expect.objectContaining({ method: "POST" }),
     );
+    // The outgoing boundary re-serialises through the validator, so the key
+    // ORDER is the schema's; the content must be exactly the input.
+    const sentBody = JSON.parse((customFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody).toEqual(input);
   });
 });

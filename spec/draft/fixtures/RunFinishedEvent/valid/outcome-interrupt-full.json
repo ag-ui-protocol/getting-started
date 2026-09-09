@@ -1,0 +1,23 @@
+{
+  "type": "RUN_FINISHED",
+  "threadId": "t1",
+  "runId": "r1",
+  "outcome": {
+    "type": "interrupt",
+    "interrupts": [
+      {
+        "id": "i1",
+        "reason": "tool_approval",
+        "message": "Approve the transfer?",
+        "toolCallId": "c1",
+        "responseSchema": {
+          "type": "object",
+          "properties": { "approved": { "type": "boolean" } }
+        },
+        "expiresAt": "2026-08-21T12:00:00Z",
+        "metadata": { "channel": "email", "priority": null },
+        "subagentRunId": "s1"
+      }
+    ]
+  }
+}

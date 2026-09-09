@@ -30,7 +30,6 @@ import {
   type AssistantMessage as AguiAssistantMessage,
   type BaseEvent,
   type Interrupt as AguiInterrupt,
-  InterruptSchema as AguiInterruptSchema,
   type Message as AguiMessage,
   type ResumeEntry,
   type RunAgentInput,
@@ -39,6 +38,7 @@ import {
   type ToolMessage as AguiToolMessage,
   type UserMessage as AguiUserMessage,
 } from "@ag-ui/core";
+import { InterruptSchema as AguiInterruptSchema } from "@ag-ui/core/schemas";
 
 import {
   buildContextExtras,

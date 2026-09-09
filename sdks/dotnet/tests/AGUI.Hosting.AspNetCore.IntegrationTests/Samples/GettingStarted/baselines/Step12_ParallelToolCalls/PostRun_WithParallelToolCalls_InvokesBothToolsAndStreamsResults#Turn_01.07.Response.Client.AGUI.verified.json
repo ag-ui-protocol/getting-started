@@ -6,9 +6,9 @@
   },
   {
     "type": "TOOL_CALL_START",
-    "parentMessageId": "",
     "toolCallId": "call_Id_1",
     "toolCallName": "get_weather",
+    "parentMessageId": "",
     "rawEvent": {
       "authorName": null,
       "role": "assistant",
@@ -126,9 +126,9 @@
   },
   {
     "type": "TOOL_CALL_START",
-    "parentMessageId": "",
     "toolCallId": "call_Id_2",
     "toolCallName": "get_current_time",
+    "parentMessageId": "",
     "rawEvent": {
       "authorName": null,
       "role": "assistant",

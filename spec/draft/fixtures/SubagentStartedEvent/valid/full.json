@@ -1,0 +1,9 @@
+{
+  "type": "SUBAGENT_STARTED",
+  "subagentRunId": "s2",
+  "name": "researcher",
+  "description": "Searches the corpus",
+  "parentSubagentRunId": "s1",
+  "parentToolCallId": "c1",
+  "parentMessageId": "m1"
+}

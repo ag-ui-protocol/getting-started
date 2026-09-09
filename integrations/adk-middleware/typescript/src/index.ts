@@ -1,5 +1,6 @@
 import { HttpAgent } from "@ag-ui/client";
-import { AgentCapabilities, AgentCapabilitiesSchema } from "@ag-ui/core";
+import type { AgentCapabilities } from "@ag-ui/core";
+import { AgentCapabilitiesSchema } from "@ag-ui/core/schemas";
 
 export class ADKAgent extends HttpAgent {
   /**

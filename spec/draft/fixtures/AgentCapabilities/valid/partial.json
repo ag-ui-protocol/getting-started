@@ -1,0 +1,18 @@
+{
+  "identity": {
+    "type": "langgraph"
+  },
+  "humanInTheLoop": {
+    "supported": true,
+    "interrupts": true,
+    "approveWithEdits": true
+  },
+  "state": {
+    "snapshots": true,
+    "deltas": false,
+    "persistentState": true
+  },
+  "transport": {
+    "streaming": true
+  }
+}

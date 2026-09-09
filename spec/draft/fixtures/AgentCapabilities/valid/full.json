@@ -1,0 +1,108 @@
+{
+  "identity": {
+    "name": "Research Assistant",
+    "type": "langgraph",
+    "description": "Finds, reads and summarises sources.",
+    "version": "1.2.0",
+    "provider": "Example Org",
+    "documentationUrl": "https://example.com/agents/research",
+    "metadata": {
+      "team": "platform",
+      "tier": 2,
+      "flags": ["beta"]
+    }
+  },
+  "transport": {
+    "streaming": true,
+    "websocket": false,
+    "httpBinary": true,
+    "pushNotifications": false,
+    "resumable": false
+  },
+  "tools": {
+    "supported": true,
+    "items": [
+      {
+        "name": "search",
+        "description": "Search the web.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "q": {
+              "type": "string"
+            }
+          },
+          "required": ["q"]
+        }
+      },
+      {
+        "name": "now",
+        "description": "The current time. Takes no arguments."
+      }
+    ],
+    "parallelCalls": true,
+    "clientProvided": true
+  },
+  "output": {
+    "structuredOutput": true,
+    "supportedMimeTypes": ["text/plain", "application/json"]
+  },
+  "state": {
+    "snapshots": true,
+    "deltas": true,
+    "memory": false,
+    "persistentState": true
+  },
+  "multiAgent": {
+    "supported": true,
+    "delegation": true,
+    "handoffs": false,
+    "subagents": [
+      {
+        "name": "researcher",
+        "description": "Gathers sources."
+      },
+      {
+        "name": "writer"
+      }
+    ]
+  },
+  "reasoning": {
+    "supported": true,
+    "streaming": true,
+    "encrypted": false
+  },
+  "multimodal": {
+    "input": {
+      "image": true,
+      "audio": false,
+      "video": false,
+      "pdf": true,
+      "file": true
+    },
+    "output": {
+      "image": false,
+      "audio": false
+    }
+  },
+  "execution": {
+    "codeExecution": true,
+    "sandboxed": true,
+    "maxIterations": 25,
+    "maxExecutionTime": 120000
+  },
+  "humanInTheLoop": {
+    "supported": true,
+    "approvals": true,
+    "interventions": false,
+    "feedback": true,
+    "interrupts": true,
+    "approveWithEdits": true
+  },
+  "custom": {
+    "vendor:feature": true,
+    "nested": {
+      "a": [1, 2]
+    }
+  }
+}

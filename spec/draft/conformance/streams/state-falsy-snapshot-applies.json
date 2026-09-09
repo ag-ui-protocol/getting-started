@@ -1,0 +1,35 @@
+{
+  "name": "state-falsy-snapshot-applies",
+  "area": "state",
+  "description": "a STATE_SNAPSHOT of `0` replaces the state like any other — state is any JSON value, and a falsy one is not an absent one",
+  "specPage": "/spec/draft/events/state",
+  "kill": "gate the state mutation on truthiness (`if (event.state)`) instead of presence (`if (event.state !== undefined)`)",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-state-falsy-snapshot",
+      "runId": "state-falsy-snapshot-r1"
+    },
+    { "type": "STATE_SNAPSHOT", "snapshot": { "count": 3 } },
+    { "type": "STATE_SNAPSHOT", "snapshot": 0 },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-state-falsy-snapshot",
+      "runId": "state-falsy-snapshot-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STATE_SNAPSHOT",
+      "RUN_FINISHED"
+    ],
+    "noWarnings": true,
+    "state": 0,
+    "eventPaths": {
+      "2.snapshot": 0
+    }
+  }
+}

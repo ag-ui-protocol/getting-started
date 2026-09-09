@@ -1,0 +1,78 @@
+{
+  "name": "unknown-property-stripped",
+  "area": "processing",
+  "description": "an undescribed property on a known event is stripped with a warning naming its path, and the event itself survives intact",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "stop stripping undescribed properties in enforceEvents \u2014 the warning may still fire, so eventAbsentPaths on the delivered TEXT_MESSAGE_CONTENT is what proves the property is gone rather than merely complained about",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-unknown-property",
+      "runId": "r-unknown-property"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-unknown-property",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-unknown-property",
+      "delta": "content survives",
+      "futureProp": 1
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "m-unknown-property"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-unknown-property",
+      "runId": "r-unknown-property"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_END",
+      "RUN_FINISHED"
+    ],
+    "warnings": [
+      "/futureProp"
+    ],
+    "messageCount": 1,
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "content survives"
+      }
+    ],
+    "eventAbsentPaths": [
+      "2.futureProp"
+    ],
+    "eventPaths": {
+      "2.delta": "content survives"
+    }
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "the .NET client has no enforcement stage — SseEventStreamFormatter.ItemParser warns only about an unrecognised event TYPE, and an undescribed property is simply not mapped by System.Text.Json onto the typed event model — so the property is gone for the same reason but no warning names its path. The delivered payload IS observable here and the paths are restated rather than dropped: TEXT_MESSAGE_START and TEXT_MESSAGE_END only update EventStreamConverter's builder state and yield no ChatResponseUpdate, so the surviving TEXT_MESSAGE_CONTENT arrives at delivered index 1 rather than 2",
+      "eventTypes": [
+        "RUN_STARTED",
+        "TEXT_MESSAGE_CONTENT",
+        "RUN_FINISHED"
+      ],
+      "warnings": [],
+      "noWarnings": true,
+      "eventAbsentPaths": [
+        "1.futureProp"
+      ],
+      "eventPaths": {
+        "1.delta": "content survives"
+      }
+    }
+  }
+}

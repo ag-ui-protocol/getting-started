@@ -1,0 +1,51 @@
+{
+  "name": "activity-snapshot-then-delta",
+  "area": "activity",
+  "description": "an ACTIVITY_SNAPSHOT creates the activity message and an ACTIVITY_DELTA patches its content in place",
+  "specPage": "/spec/draft/events/activity",
+  "kill": "drop the `jsonpatch.applyPatch` call in the ACTIVITY_DELTA branch, leaving the snapshot's content in place",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-activity-snapshot-then-delta",
+      "runId": "activity-snapshot-then-delta-r1"
+    },
+    {
+      "type": "ACTIVITY_SNAPSHOT",
+      "messageId": "activity-snapshot-then-delta-act",
+      "activityType": "web_search",
+      "content": { "query": "ag-ui", "found": 0 }
+    },
+    {
+      "type": "ACTIVITY_DELTA",
+      "messageId": "activity-snapshot-then-delta-act",
+      "activityType": "web_search",
+      "patch": [{ "op": "replace", "path": "/found", "value": 3 }]
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-activity-snapshot-then-delta",
+      "runId": "activity-snapshot-then-delta-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "activity-snapshot-then-delta-act",
+        "role": "activity",
+        "activityType": "web_search",
+        "content": { "query": "ag-ui", "found": 3 }
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client has no activity reducer: ACTIVITY_SNAPSHOT and ACTIVITY_DELTA reach a consumer only as RawRepresentation on a pass-through update, so no activity-role message is materialised and no patch is applied. Alignment tracked separately.",
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

@@ -6,9 +6,9 @@
   },
   {
     "type": "TOOL_CALL_START",
-    "parentMessageId": "guid_Id_1",
     "toolCallId": "call_Id_1",
     "toolCallName": "ApproveExpenseReport",
+    "parentMessageId": "guid_Id_1",
     "rawEvent": {
       "authorName": null,
       "role": "assistant",

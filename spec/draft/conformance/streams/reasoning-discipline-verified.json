@@ -1,0 +1,59 @@
+{
+  "name": "reasoning-discipline-verified",
+  "area": "reasoning",
+  "description": "a REASONING_MESSAGE_CONTENT with no opener is a streaming-discipline violation and is rejected, exactly as the same shape is for a text message: reasoning messages and spans are bracketed like every other streamed entity, and the consumer does not invent the message an orphaned fragment names",
+  "specPage": "/spec/draft/events/reasoning",
+  "kill": "stop reading the reasoning open/close sets in verifyEvents — delete the `if (!open.has(messageId))` guard in verify.ts's REASONING_MESSAGE_CONTENT / REASONING_MESSAGE_END / REASONING_END branch, where `open` is the per-branch alias for `activeReasoningMessages` (`activeReasoningSpans` when the event is REASONING_END), and the orphaned fragment is tolerated again",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-reasoning-discipline",
+      "runId": "r-reasoning-discipline",
+      "protocolVersion": "1.0"
+    },
+    {
+      "type": "REASONING_MESSAGE_CONTENT",
+      "messageId": "m-reasoning-discipline-1",
+      "delta": "orphaned thought"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-reasoning-discipline-2",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-reasoning-discipline-2",
+      "delta": "the answer"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-reasoning-discipline-2" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-reasoning-discipline",
+      "runId": "r-reasoning-discipline"
+    }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "No active reasoning message found with ID 'm-reasoning-discipline-1'"
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client has no reasoning open/close verification: REASONING_MESSAGE_CONTENT yields a reasoning-content update whether or not an opener preceded it, so the stream is accepted and an extra message survives. `errorContains` is deliberately the empty string, which asserts nothing — it LIFTS the base's requirement rather than restating it, because this lane produces no rejection to match against; the outcome and message assertions below are what it is actually held to. Microsoft.Extensions.AI carries reasoning as TextReasoningContent, which AsAGUIMessages does not project into `content`. Closing this divergence means giving the .NET client the same bracketing check and deleting this override.",
+      "outcome": "completed",
+      "errorContains": "",
+      "messageCount": 2,
+      "messages": [
+        {
+          "id": "m-reasoning-discipline-1",
+          "role": "assistant"
+        },
+        {
+          "id": "m-reasoning-discipline-2",
+          "role": "assistant",
+          "content": "the answer"
+        }
+      ]
+    }
+  }
+}

@@ -44,6 +44,20 @@ function toModelSafeMessageId(id: string): string {
     : id.replace(/[^A-Za-z0-9_-]/g, "-");
 }
 
+/**
+ * The legacy binary content part, which left `@ag-ui/core` in 1.0. Old
+ * producers still send it, so this boundary keeps reading it — typed locally,
+ * because the protocol no longer knows the shape.
+ */
+interface LegacyBinaryInputContent {
+  type: "binary";
+  mimeType: string;
+  id?: string;
+  url?: string;
+  data?: string;
+  filename?: string;
+}
+
 function mediaSourceToUrl(
   source: InputContentDataSource | InputContentUrlSource,
 ): string {
@@ -110,7 +124,7 @@ const toMastraContent = (content: Message["content"]): string | any[] => {
         break;
       case "binary": {
         // Deprecated BinaryInputContent
-        const binaryPart = part as Extract<InputContent, { type: "binary" }>;
+        const binaryPart = part as unknown as LegacyBinaryInputContent;
         if (binaryPart.url) {
           parts.push({ type: "image", image: binaryPart.url });
         } else if (binaryPart.data && binaryPart.mimeType) {

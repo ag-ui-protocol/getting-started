@@ -1,0 +1,17 @@
+{
+  "type": "MESSAGES_SNAPSHOT",
+  "messages": [
+    {
+      "id": "1",
+      "role": "assistant",
+      "content": "hi",
+      "subagentRunId": "s1"
+    },
+    {
+      "id": "2",
+      "role": "user",
+      "content": "and you?",
+      "subagentRunId": "s1"
+    }
+  ]
+}

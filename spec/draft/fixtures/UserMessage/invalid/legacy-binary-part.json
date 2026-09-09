@@ -1,0 +1,11 @@
+{
+  "id": "1",
+  "role": "user",
+  "content": [
+    {
+      "type": "binary",
+      "mimeType": "image/png",
+      "data": "aGk="
+    }
+  ]
+}

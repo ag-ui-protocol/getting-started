@@ -1,0 +1,50 @@
+{
+  "name": "producer-declares-newer-version-warns",
+  "area": "versioning",
+  "description": "a producer declaring a newer minor of the line this client implements is served, not rejected — the consumer proceeds under the processing model and warns",
+  "specPage": "/spec/draft/basic/versioning",
+  "kill": "drop the RUN_STARTED.protocolVersion comparison, so a newer producer declaration passes unremarked",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-newer-version",
+      "runId": "r-newer-version",
+      "protocolVersion": "1.1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "m-newer-version-1",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "m-newer-version-1",
+      "delta": "served anyway"
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-newer-version-1" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-newer-version",
+      "runId": "r-newer-version"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "warnings": ["1.1"],
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "m-newer-version-1",
+        "role": "assistant",
+        "content": "served anyway"
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": ".NET does not implement the version-declaration comparison, and RUN_STARTED carrying a newer protocolVersion is otherwise an ordinary recognised event, so the replay is silent. `warnings` is emptied only to displace the base expectation — an override replaces a key rather than removing it — and `noWarnings` is what asserts the silence. Alignment tracked separately.",
+      "warnings": [],
+      "noWarnings": true
+    }
+  }
+}

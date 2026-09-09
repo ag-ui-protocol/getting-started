@@ -189,23 +189,21 @@ describe("subagentRunId attribution over protobuf", () => {
     }
   });
 
-  it("documents that chunk events still cannot be encoded at all (pre-existing)", () => {
-    // TEXT_MESSAGE_CHUNK and TOOL_CALL_CHUNK have proto messages AND oneof slots
-    // but no EventType enum entry, so writing base_event.type throws. That
-    // predates subagents and is part of the wider protobuf-parity gap (only 19 of
-    // the 36 event types are modelled), which is explicitly out of scope here — see
-    // PNI-277. Both messages did get a subagent_run_id field for when they are
-    // wired up, but the field is unreachable until the enum entries exist.
-    //
-    // This is asserted rather than skipped so that whoever fixes the enum sees
-    // this test fail and turns it into a real round-trip assertion.
+  it("carries attribution on the chunk events, now that they have enum entries", () => {
+    // These once had proto messages and oneof slots but no EventType enum entry,
+    // so writing base_event.type threw and their subagent_run_id field was
+    // unreachable. The envelope is generated from the schema now, so every event
+    // type has an entry and the round trip this test was written to wait for is
+    // the assertion it makes.
     for (const event of [
       { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m", delta: "x", subagentRunId: "s" },
       { type: EventType.TOOL_CALL_CHUNK, toolCallId: "t", delta: "y", subagentRunId: "s" },
     ]) {
-      expect(() => encode(event as never), `${event.type} now encodes — see PNI-277`).toThrow(
-        /invalid int32/,
-      );
+      const decoded = decode(encode(event as never)) as Record<string, unknown>;
+      expect(decoded, `${event.type} lost its attribution`).toMatchObject({
+        type: event.type,
+        subagentRunId: "s",
+      });
     }
   });
 

@@ -1,0 +1,9 @@
+{
+  "type": "STATE_DELTA",
+  "delta": [
+    {
+      "op": "add",
+      "value": 1
+    }
+  ]
+}

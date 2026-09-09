@@ -213,8 +213,18 @@ function documentBlock(source: unknown, field: string): ContentBlockParam {
   throw new Error(`[ClaudeAdapter] ${field}.type must be data or url`);
 }
 
+// Older callers can still send binary blocks to this adapter even though the
+// canonical protocol now uses image/document content with an explicit source.
+type LegacyBinaryContent = {
+  type: "binary";
+  mimeType: string;
+  data?: string;
+  url?: string;
+  id?: string;
+};
+
 function legacyBinaryBlock(
-  block: Extract<InputContent, { type: "binary" }>,
+  block: LegacyBinaryContent,
   index: number,
 ): ContentBlockParam {
   const mediaType = normalizedMediaType(block.mimeType);
@@ -241,7 +251,7 @@ function legacyBinaryBlock(
 }
 
 function convertContentBlock(
-  block: InputContent,
+  block: InputContent | LegacyBinaryContent,
   index: number,
 ): ContentBlockParam | undefined {
   if (!block || typeof block !== "object" || typeof block.type !== "string") {

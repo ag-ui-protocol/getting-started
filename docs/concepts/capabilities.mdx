@@ -12,11 +12,17 @@ assumptions.
 
 ## How It Works
 
-`AbstractAgent` exposes an optional `getCapabilities()` method that returns a
-typed snapshot of everything the agent currently supports:
+`AbstractAgent` declares an optional `getCapabilities()` method that returns a
+typed snapshot of everything the agent currently supports. It is implemented by
+agent subclasses that know their own capabilities — the LangGraph and ADK
+integrations, or your own — not by the bare `HttpAgent`, which is a transport
+and has no discovery endpoint to ask. The optional call below returns
+`undefined` for an agent that does not implement it:
 
 ```typescript
-const agent = new HttpAgent({ url: "https://my-agent.example.com/api" })
+// Any AbstractAgent subclass that implements getCapabilities(); a plain
+// HttpAgent does not, and would yield undefined here.
+const agent = new LangGraphAgent({ url: "https://my-agent.example.com/api" })
 
 const capabilities = await agent.getCapabilities?.()
 
@@ -194,7 +200,7 @@ interface MultiAgentCapabilities {
   /** Set `true` if the agent can transfer the conversation entirely to another agent. */
   handoffs?: boolean
   /** List of sub-agents this agent can invoke. Helps clients build agent selection UIs. */
-  subAgents?: Array<{ name: string; description?: string }>
+  subagents?: Array<{ name: string; description?: string }>
 }
 ```
 
@@ -372,8 +378,8 @@ if (capabilities?.reasoning?.supported) {
 }
 
 // Only show sub-agent selector if available
-if (capabilities?.multiAgent?.subAgents?.length) {
-  showSubAgentSelector(capabilities.multiAgent.subAgents)
+if (capabilities?.multiAgent?.subagents?.length) {
+  showSubAgentSelector(capabilities.multiAgent.subagents)
 }
 
 // Only show approval UI if HITL is supported
@@ -389,8 +395,9 @@ Disable features the agent doesn't support instead of failing at runtime:
 ```typescript
 const capabilities = await agent.getCapabilities?.()
 
-const canUseStructuredOutput = capabilities?.output?.structuredOutput ?? false
-const canStream = capabilities?.transport?.streaming ?? false
+// Gate on an explicit declaration: an omitted field means undeclared, not unsupported.
+const canUseStructuredOutput = capabilities?.output?.structuredOutput === true
+const canStream = capabilities?.transport?.streaming === true
 ```
 
 ### Custom Capabilities

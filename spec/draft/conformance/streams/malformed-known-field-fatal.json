@@ -1,0 +1,18 @@
+{
+  "name": "malformed-known-field-fatal",
+  "area": "processing",
+  "description": "a known field carrying a wrong-typed value is fatal, never coerced or ignored",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "make enforcement coerce or skip a malformed value on a described field — coerce the delta to a string, or catch the `schema.parse` throw in enforceEvents and pass the event on. The rest of the stream is conformant: the message is opened, filled and closed before RUN_FINISHED, so the malformed delta is the ONLY thing that can fail this run. (It used to end with the message still open, which meant an implementation that quietly coerced the delta would still have failed here — on the open message — and the fixture would have stayed green for the wrong reason.) `errorContains` pins the rejection to the offending field so an unrelated error cannot satisfy it either.",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-malformed", "runId": "r-1" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "m-1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "m-1", "delta": 42 },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-1" },
+    { "type": "RUN_FINISHED", "threadId": "t-malformed", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "failed",
+    "errorContains": "delta"
+  }
+}

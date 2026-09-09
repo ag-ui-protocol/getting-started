@@ -1,4 +1,5 @@
-import { EventSchemas } from "@ag-ui/core";
+import { omitOptionalNulls } from "@ag-ui/core";
+import { EventSchemas } from "@ag-ui/core/schemas";
 
 import fixture from "../../../../../fixtures/null-omission.json";
 
@@ -8,11 +9,8 @@ import { EventEncoder } from "../encoder";
  * Runs `sdks/fixtures/null-omission.json`, the cross-language fixture the Python and .NET
  * SDKs run too.
  *
- * TypeScript is the SDK that already behaves correctly here — `JSON.stringify` drops
- * `undefined`, so a field with no value simply does not appear. Running the fixture from
- * this side is what makes it the shared contract rather than a Python/.NET convention: if a
- * case is added that TypeScript would not actually produce, this test says so instead of the
- * other two SDKs being held to something the reference implementation does not do.
+ * Producer inputs may contain optional nulls; serialization omits them using
+ * the known protocol shape. Required and nested payload nulls remain intact.
  */
 
 const SDK_NAME = "typescript";
@@ -35,7 +33,7 @@ describe("null omission cross-language fixture", () => {
   it.each(cases.map((entry) => [entry.name, entry] as const))(
     "%s re-serializes to its expected JSON",
     (_name, entry) => {
-      const event = EventSchemas.parse(entry.input);
+      const event = EventSchemas.parse(omitOptionalNulls(entry.input, "Event"));
       const encoded = new EventEncoder().encode(event);
       const payload = JSON.parse(encoded.slice("data: ".length, -"\n\n".length));
 

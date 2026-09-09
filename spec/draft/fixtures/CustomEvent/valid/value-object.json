@@ -1,0 +1,7 @@
+{
+  "type": "CUSTOM",
+  "name": "app.thing",
+  "value": {
+    "a": 1
+  }
+}

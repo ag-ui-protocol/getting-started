@@ -1,0 +1,51 @@
+{
+  "name": "activity-replace-false-preserves",
+  "area": "activity",
+  "description": "an ACTIVITY_SNAPSHOT with `replace: false` for an existing activity leaves it as it stands — its content and its activityType both",
+  "specPage": "/spec/draft/events/activity",
+  "kill": "ignore `replace` in the ACTIVITY_SNAPSHOT branch (`const replace = true`), or apply only the content half of the opt-out and retype the message anyway",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-activity-replace-false",
+      "runId": "activity-replace-false-r1"
+    },
+    {
+      "type": "ACTIVITY_SNAPSHOT",
+      "messageId": "activity-replace-false-act",
+      "activityType": "web_search",
+      "content": { "query": "ag-ui", "found": 1 }
+    },
+    {
+      "type": "ACTIVITY_SNAPSHOT",
+      "messageId": "activity-replace-false-act",
+      "activityType": "file_search",
+      "content": { "query": "something else", "found": 9 },
+      "replace": false
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-activity-replace-false",
+      "runId": "activity-replace-false-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "activity-replace-false-act",
+        "role": "activity",
+        "activityType": "web_search",
+        "content": { "query": "ag-ui", "found": 1 }
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client has no activity reducer: ACTIVITY_SNAPSHOT and ACTIVITY_DELTA reach a consumer only as RawRepresentation on a pass-through update, so no activity-role message is ever materialised and replace:false has nothing to preserve. Alignment tracked separately.",
+      "messageCount": 0,
+      "messages": []
+    }
+  }
+}

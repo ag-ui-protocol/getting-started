@@ -1,0 +1,6 @@
+{
+  "id": "msg_1",
+  "role": "tool",
+  "content": "42",
+  "toolCallId": "call_1"
+}

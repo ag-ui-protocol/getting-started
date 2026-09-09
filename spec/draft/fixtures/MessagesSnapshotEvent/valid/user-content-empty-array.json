@@ -1,0 +1,10 @@
+{
+  "type": "MESSAGES_SNAPSHOT",
+  "messages": [
+    {
+      "id": "msg_1",
+      "role": "user",
+      "content": []
+    }
+  ]
+}

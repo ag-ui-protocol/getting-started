@@ -260,8 +260,9 @@ public sealed class AGUIChatClientTest
         Assert.Equal("userId", context.Description);
         Assert.Equal("u-123", context.Value);
 
-        Assert.Equal(JsonValueKind.Object, sent.ForwardedProperties.ValueKind);
-        Assert.Equal("acme", sent.ForwardedProperties.GetProperty("tenant").GetString());
+        Assert.NotNull(sent.ForwardedProperties);
+        Assert.Equal(JsonValueKind.Object, sent.ForwardedProperties!.Value.ValueKind);
+        Assert.Equal("acme", sent.ForwardedProperties!.Value.GetProperty("tenant").GetString());
     }
 
     // A caller-supplied Resume (via RawRepresentationFactory) must be forwarded too,

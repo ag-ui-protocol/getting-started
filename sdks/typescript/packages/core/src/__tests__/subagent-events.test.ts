@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { EventType } from "../index";
 import {
   TextMessageStartEventSchema,
   TextMessageChunkEventSchema,
@@ -9,8 +10,7 @@ import {
   StateDeltaEventSchema,
   StepStartedEventSchema,
   CustomEventSchema,
-  EventType,
-} from "../events";
+} from "../schemas";
 
 describe("event subagentRunId attribution", () => {
   it("accepts subagentRunId on creation events", () => {

@@ -6,7 +6,10 @@ import asyncio
 import os
 import pytest
 import uuid
-from ag_ui.core import EventType, RunAgentInput, UserMessage, BinaryInputContent, TextInputContent
+from ag_ui.core import EventType, RunAgentInput, UserMessage, TextInputContent
+# The legacy binary part left ag_ui.core in 1.0; the boundary-local type in
+# the converters module is what this middleware still reads.
+from ag_ui_adk.utils.converters import BinaryInputContent
 from ag_ui_adk import ADKAgent
 from ag_ui_adk.session_manager import SessionManager
 from google.adk.apps import App
@@ -203,7 +206,7 @@ async def test_from_app_with_valid_mime_type(sample_app):
         thread_id=f"test_thread_{uuid.uuid4().hex[:8]}",
         run_id=f"test_run_{uuid.uuid4().hex[:8]}",
         messages=[
-            UserMessage(
+            UserMessage.model_construct(
                 id="msg1",
                 content=[
                     TextInputContent(text="What color is this? Reply briefly."),
@@ -241,7 +244,7 @@ async def test_from_app_with_unsupported_mime_type(sample_app):
         thread_id=f"test_thread_{uuid.uuid4().hex[:8]}",
         run_id=f"test_run_{uuid.uuid4().hex[:8]}",
         messages=[
-            UserMessage(
+            UserMessage.model_construct(
                 id="msg1",
                 content=[
                     TextInputContent(text="What color is this? Reply briefly."),

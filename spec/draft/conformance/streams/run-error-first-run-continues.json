@@ -1,0 +1,24 @@
+{
+  "name": "run-error-first-run-continues",
+  "area": "lifecycle",
+  "description": "a stream may OPEN with RUN_ERROR — the spec admits it, because a run can fail before it begins — so the client raises no first-event violation; the failure is delivered to the application as an event, and consuming the stream is not itself a failure",
+  "specPage": "/spec/draft/events/lifecycle",
+  "kill": "narrow the first-event check in verifyEvents (`eventType !== RUN_STARTED && eventType !== RUN_ERROR`) to RUN_STARTED alone — the leading RUN_ERROR is then rejected with `First event must be 'RUN_STARTED'`, the run ends failed and no RUN_ERROR reaches the application, so `outcome`, `eventTypes` and `runError` all fail together",
+  "stream": [
+    {
+      "type": "RUN_ERROR",
+      "message": "run-error-first: the agent was unreachable",
+      "code": "UNAVAILABLE"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": ["RUN_ERROR"],
+    "eventPaths": {
+      "0.code": "UNAVAILABLE"
+    },
+    "noWarnings": true,
+    "messageCount": 0,
+    "runError": "run-error-first: the agent was unreachable"
+  }
+}

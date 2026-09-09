@@ -1,0 +1,146 @@
+---
+title: "Capabilities"
+description: "What an agent declares about itself before a run, what a declaration obliges, and what it does not — draft"
+---
+
+import DraftBanner from "/snippets/spec-draft-banner.mdx";
+
+<DraftBanner />
+
+A run shows a consumer what an agent *did*. Capabilities let a consumer learn
+what an agent *can do* before asking it to do anything: whether it streams
+reasoning, whether it will pause for approval, which modalities it accepts,
+which subagents it may delegate to. An application uses them to shape the
+interface it offers — a file picker only where files are accepted, an approval
+affordance only where interrupts are supported — rather than discovering support
+by trial.
+
+The [schema](/spec/draft/schema#agentcapabilities) defines the shape:
+`AgentCapabilities`, a set of OPTIONAL groups, each an object of OPTIONAL
+fields. This page states what a declaration obliges. It deliberately does not
+specify how a consumer *obtains* a declaration — see [Retrieval](#retrieval).
+
+## Declaring
+
+Every group, and every field within a group, is OPTIONAL. A producer declares
+what it has something to say about and omits the rest. Records a field
+references keep their own requirements: a `SubagentInfo` needs its `name`, and
+an entry in `tools.items` is a `Tool`.
+
+**An omitted field means undeclared, not unsupported.** An agent that says
+nothing about `reasoning` has not said it cannot reason; a consumer MUST NOT
+infer the absence of a capability from the absence of its declaration. Where an
+agent wants to state that something is *not* supported, the boolean fields exist
+to carry `false` explicitly.
+
+A producer SHOULD declare only what it does. A declaration is a statement to the
+application about how to prepare for a run; a declaration the agent does not
+honour misleads the interface built on it. There is no obligation to declare
+everything true — a minimal declaration is conforming — but what is declared
+SHOULD hold.
+
+Declarations are informative, not binding. The event stream is authoritative: a
+consumer MUST NOT reject a stream, or treat a run as failed, because an event
+arrives that a declaration did not anticipate, or because a declared capability
+went unexercised. A run that emits reasoning events under
+`reasoning: { supported: false }` has a producer worth a complaint, not a stream
+worth rejecting.
+
+## The groups
+
+The groups partition the protocol's features. Where a group describes an event
+family, that family's page governs what the events themselves oblige; the
+declaration only anticipates them.
+
+| Group            | Declares                                                                                         | Governed by                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `identity`       | Name, framework, version, provider, documentation, and an open `metadata` object                 | this page                                                            |
+| `transport`      | Which [transport bindings](/spec/draft/basic/transports) the agent serves                        | [Transports](/spec/draft/basic/transports)                           |
+| `tools`          | Whether the agent calls tools, the tools it *provides*, and whether it accepts the application's tools | [Tool calls](/spec/draft/events/tool-calls)                          |
+| `output`         | Structured output and producible MIME types                                                      | —                                                                    |
+| `state`          | Snapshots, deltas, persistence across runs, long-term memory                                     | [State](/spec/draft/events/state)                                    |
+| `multiAgent`     | Delegation, handoffs, and the `subagents` it may invoke                                          | [Subagents](/spec/draft/events/subagents)                            |
+| `reasoning`      | Whether reasoning is emitted, streamed, or encrypted                                             | [Reasoning](/spec/draft/events/reasoning)                            |
+| `multimodal`     | Modalities accepted as `input` and produced as `output`                                          | [Run input](/spec/draft/basic/run-input#messages) for `input`; see note for `output` |
+| `execution`      | Code execution, sandboxing, iteration and time limits                                            | —                                                                    |
+| `humanInTheLoop` | Approvals, interventions, feedback, and participation in interrupt–resume                        | [Interrupts and Resume](/spec/draft/basic/patterns/interrupt-resume) |
+| `custom`         | Anything the standard groups do not cover                                                        | —                                                                    |
+
+Some fields deserve a note beyond their description in the schema.
+
+`output.structuredOutput` declares that an agent can shape its answer to a
+schema, but this version of the protocol has no field through which a consumer
+supplies one and no event that identifies output as structured. The declaration
+tells an application the agent is able; how a schema reaches the agent and how
+the shaped answer comes back are integration-specific, and a consumer MUST NOT
+expect a standard event to carry either.
+
+`multimodal.output` declares what an agent can *produce*, but this version of
+the protocol defines no image or audio output: assistant message content and
+`TEXT_MESSAGE_CONTENT` deltas are text. The declaration is for the application
+— which may receive such output through an integration-specific channel — and
+nothing in this specification says how it travels. A consumer MUST NOT expect a
+standard event to carry it.
+
+`tools.items` lists the tools the *agent* provides — its own functions, search,
+code execution — and is distinct from `RunAgentInput.tools`, which carries the
+tools the *application* offers for one run. The two never merge: an agent's own
+tools are not the application's to execute, and the application's are not
+declared here.
+
+`multiAgent.subagents` names the subagents an agent may invoke, for selection
+interfaces. It is a list of definitions, not of invocations: the identifiers a
+consumer meets on the wire are `subagentRunId` values, one per invocation,
+minted at run time — [Subagents](/spec/draft/events/subagents) governs those,
+and nothing here predicts them.
+
+Two `transport` flags likewise describe mechanisms this version does not
+define. `transport.resumable` speaks of resuming an interrupted stream by
+sequence number, and `transport.pushNotifications` of delivery after a run has
+finished; neither [HTTP binding](/spec/draft/basic/transports) carries sequence
+numbers, resumes a stream, or defines a post-run channel. An agent MAY declare
+them for a transport of its own; a consumer MUST NOT expect either of the
+standard bindings to honour them.
+
+## `identity.metadata` and `custom`
+
+Two open objects carry what the standard fields do not. `identity.metadata` is
+the protocol's [Metadata](/spec/draft/basic/metadata) shape — open by key, any
+JSON value under a key — for integration-specific identity information. `custom`
+is the escape hatch for capabilities that fit no standard group. Both are open
+by key: a consumer MUST preserve what it does not recognise inside them rather
+than stripping it, exactly as for metadata elsewhere. The protocol attaches no
+meaning to either.
+
+## Retrieval
+
+This specification defines the shape of a declaration and what it obliges. It
+does not define how a consumer obtains one. No transport binding in this version
+carries a capabilities exchange, and this page does not create one: whether an
+agent's capabilities are read from a method on a client-side agent object,
+fetched from an application-defined endpoint, or configured statically is the
+implementation's business.
+
+This is deliberate. A discovery protocol is a larger commitment than a
+declaration shape, and the shape is useful without it. An implementation that
+exposes capabilities by any means MUST use this shape for them.
+
+## Error Handling
+
+A capabilities object is not carried by the event pipeline, so the
+[processing model](/spec/draft/basic/processing)'s stripping obligation does not
+apply to it; the distinction that model draws between *unrecognised* and
+*malformed* does. Unrecognised members — a group
+or field this version does not define — are the strict layer's concern, not the
+consumer's: the schema closes every capability object, so such a document does
+not validate against it, but a consumer MUST NOT reject a declaration for
+carrying them, so a newer agent's declaration does not bounce off an older
+consumer. Capabilities do not pass through the event pipeline's enforcement
+stage, so whether a consumer keeps unrecognised members or drops them is the
+implementation's business, and conforming implementations differ. A known field carrying a value the schema rejects
+— a string where a boolean belongs — is malformed, and a consumer MUST NOT use a
+declaration it cannot validate.
+
+Because declarations are informative, a rejected or absent declaration MUST NOT
+prevent a run. A consumer that cannot obtain or validate an agent's capabilities
+proceeds as it would for an agent that declared nothing.

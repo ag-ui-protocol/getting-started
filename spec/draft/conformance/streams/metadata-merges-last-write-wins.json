@@ -1,0 +1,57 @@
+{
+  "name": "metadata-merges-last-write-wins",
+  "area": "metadata",
+  "description": "metadata from every event of a text message merges into it key by key, last write winning, and the merge does not recurse",
+  "specPage": "/spec/draft/basic/metadata",
+  "kill": "fix a message's metadata at TEXT_MESSAGE_START instead of merging each event's, or make the merge recurse into a key's value",
+  "stream": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "t-metadata-merges",
+      "runId": "metadata-merges-r1"
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "metadata-merges-m1",
+      "role": "assistant",
+      "metadata": { "a": 1, "b": 1, "trace": ["one", "two"] }
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "metadata-merges-m1",
+      "delta": "done",
+      "metadata": { "b": 2, "c": 3, "trace": ["three"] }
+    },
+    { "type": "TEXT_MESSAGE_END", "messageId": "metadata-merges-m1" },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "t-metadata-merges",
+      "runId": "metadata-merges-r1"
+    }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "noWarnings": true,
+    "messageCount": 1,
+    "messages": [
+      {
+        "id": "metadata-merges-m1",
+        "role": "assistant",
+        "content": "done",
+        "metadata": { "a": 1, "b": 2, "c": 3, "trace": ["three"] }
+      }
+    ]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "Message metadata is a wire-level field in .NET: TEXT_MESSAGE_START and TEXT_MESSAGE_END yield no ChatResponseUpdate, so there is no merged metadata on the conversation surface to test last-write-wins against. Deliberate and documented in docs/concepts/metadata.mdx.",
+      "messages": [
+        {
+          "id": "metadata-merges-m1",
+          "role": "assistant",
+          "content": "done"
+        }
+      ]
+    }
+  }
+}

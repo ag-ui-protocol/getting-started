@@ -1,0 +1,42 @@
+{
+  "name": "unknown-event-dropped",
+  "area": "processing",
+  "description": "an event type the client does not recognise is dropped with a warning and the run survives",
+  "specPage": "/spec/draft/basic/processing",
+  "kill": "return `of(event)` instead of `EMPTY` from the `!isRecognizedEvent` branch in enforceEvents — the warning is still emitted and the run still completes, so `outcome`, `warnings`, `messageCount` and `messages` all stay green and only `eventTypesAbsent`/`eventTypes` catch it: FUTURE_EVENT reaches application code. Failing the run on an unrecognised type instead kills the `completed` expectation.",
+  "stream": [
+    { "type": "RUN_STARTED", "threadId": "t-unknown-event", "runId": "r-1" },
+    { "type": "TEXT_MESSAGE_START", "messageId": "m-1", "role": "assistant" },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "m-1", "delta": "before" },
+    { "type": "FUTURE_EVENT", "somethingNew": true },
+    { "type": "TEXT_MESSAGE_CONTENT", "messageId": "m-1", "delta": " and after" },
+    { "type": "TEXT_MESSAGE_END", "messageId": "m-1" },
+    { "type": "RUN_FINISHED", "threadId": "t-unknown-event", "runId": "r-1" }
+  ],
+  "expect": {
+    "outcome": "completed",
+    "eventTypes": [
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_CONTENT",
+      "TEXT_MESSAGE_END",
+      "RUN_FINISHED"
+    ],
+    "eventTypesAbsent": ["FUTURE_EVENT"],
+    "warnings": ["FUTURE_EVENT"],
+    "messageCount": 1,
+    "messages": [{ "role": "assistant", "content": "before and after" }]
+  },
+  "expectOverrides": {
+    "dotnet": {
+      "intentional": "The .NET client's event surface is ChatResponseUpdate.RawRepresentation, and the builder-only events yield no update: TEXT_MESSAGE_START and TEXT_MESSAGE_END open and close the message being assembled and hand a consumer nothing, so they cannot appear in a delivered list however faithfully the client processes them. The list here is the base list minus exactly those; every event this fixture is actually about is still in it, in order. The rule itself is untouched: `eventTypesAbsent` is inherited from the base, so FUTURE_EVENT still must not reach application code on this lane.",
+      "eventTypes": [
+        "RUN_STARTED",
+        "TEXT_MESSAGE_CONTENT",
+        "TEXT_MESSAGE_CONTENT",
+        "RUN_FINISHED"
+      ]
+    }
+  }
+}

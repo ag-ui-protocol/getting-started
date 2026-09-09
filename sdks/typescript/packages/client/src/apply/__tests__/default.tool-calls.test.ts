@@ -47,7 +47,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TOOL_CALL_START,
       toolCallId: "tool1",
@@ -135,7 +139,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     // 1. assistant message with the tool call
     events$.next({
       type: EventType.TOOL_CALL_START,
@@ -207,7 +215,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events for two different tool calls
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First tool call
     events$.next({
@@ -312,7 +324,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TOOL_CALL_START,
       toolCallId: "tool1",
@@ -376,7 +392,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events with errors in the tool args JSON
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TOOL_CALL_START,
       toolCallId: "tool1",
@@ -436,7 +456,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
     // Send events with a mix of tool calls and text messages
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First tool call
     events$.next({
@@ -521,7 +545,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First tool call with parentMessageId
     events$.next({
@@ -608,7 +636,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // Build up: assistant message with first tool call, then a tool result
     events$.next({
@@ -698,7 +730,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
 
     // First: create a tool result message that will occupy the collidingId
     // We'll simulate this by using a full tool-call cycle with a result
@@ -781,7 +817,11 @@ describe("defaultApplyEvents with tool calls", () => {
     const result$ = defaultApplyEvents(initialState, events$, agent, []);
     const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-    events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+    events$.next({
+      type: EventType.RUN_STARTED,
+      threadId: "test",
+      runId: "test",
+    } as RunStartedEvent);
     events$.next({
       type: EventType.TOOL_CALL_START,
       toolCallId: "tc-1",
@@ -855,7 +895,11 @@ describe("defaultApplyEvents with tool calls", () => {
         parentMessageId: "msg-1",
       } as ToolCallStartEvent;
 
-      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.RUN_STARTED,
+        threadId: "test",
+        runId: "test",
+      } as RunStartedEvent);
       events$.next(start);
       events$.next(start);
       events$.next({
@@ -886,7 +930,11 @@ describe("defaultApplyEvents with tool calls", () => {
       const result$ = defaultApplyEvents(runInput, events$, agent, []);
       const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.RUN_STARTED,
+        threadId: "test",
+        runId: "test",
+      } as RunStartedEvent);
       events$.next({
         type: EventType.TOOL_CALL_START,
         toolCallId: "tc-1",
@@ -927,7 +975,11 @@ describe("defaultApplyEvents with tool calls", () => {
       const result$ = defaultApplyEvents(runInput, events$, agent, []);
       const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.RUN_STARTED,
+        threadId: "test",
+        runId: "test",
+      } as RunStartedEvent);
       events$.next({
         type: EventType.TOOL_CALL_START,
         toolCallId: "tc-1",
@@ -963,7 +1015,11 @@ describe("defaultApplyEvents with tool calls", () => {
       const result$ = defaultApplyEvents(runInput, events$, agent, []);
       const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-      events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+      events$.next({
+        type: EventType.RUN_STARTED,
+        threadId: "test",
+        runId: "test",
+      } as RunStartedEvent);
       events$.next({
         type: EventType.TOOL_CALL_START,
         toolCallId: "tc-1",
@@ -985,7 +1041,11 @@ describe("defaultApplyEvents with tool calls", () => {
         const result$ = defaultApplyEvents(runInput, events$, agent, []);
         const stateUpdatesPromise = firstValueFrom(result$.pipe(toArray()));
 
-        events$.next({ type: EventType.RUN_STARTED } as RunStartedEvent);
+        events$.next({
+          type: EventType.RUN_STARTED,
+          threadId: "test",
+          runId: "test",
+        } as RunStartedEvent);
         events$.next({
           type: EventType.TOOL_CALL_START,
           toolCallId: "tc-1",

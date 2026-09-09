@@ -182,3 +182,109 @@ class TestEventEncoder(unittest.TestCase):
             original_event.model_dump(), 
             deserialized_event.model_dump()
         )
+
+
+class TestWireNullParity(unittest.TestCase):
+    """
+    The wire behaves exactly as TypeScript's JSON.stringify: an OPTIONAL field
+    that is absent (or explicitly None) never appears, while an explicit null
+    on a REQUIRED field is data and survives — at every depth, patch
+    operations included.
+    """
+
+    def _wire(self, event):
+        payload = EventEncoder().encode(event)
+        self.assertTrue(payload.startswith("data: "))
+        return json.loads(payload[len("data: "):])
+
+    def test_required_null_payload_survives(self):
+        from ag_ui.core import CustomEvent, StateSnapshotEvent
+        self.assertEqual(
+            self._wire(CustomEvent(name="hb", value=None)),
+            {"type": "CUSTOM", "name": "hb", "value": None},
+        )
+        self.assertIsNone(self._wire(StateSnapshotEvent(snapshot=None))["snapshot"])
+
+    def test_nested_patch_null_value_survives(self):
+        from ag_ui.core import StateDeltaEvent
+        wire = self._wire(
+            StateDeltaEvent(delta=[{"op": "add", "path": "/cleared", "value": None}])
+        )
+        self.assertEqual(wire["delta"][0], {"op": "add", "path": "/cleared", "value": None})
+
+    def test_optional_none_stays_absent(self):
+        from ag_ui.core import TextMessageStartEvent
+        wire = self._wire(TextMessageStartEvent(message_id="m", name=None))
+        self.assertNotIn("name", wire)
+        self.assertNotIn("role", wire)
+
+    def test_null_valued_unknown_field_is_data(self):
+        # An unknown key the tolerant models kept is data by definition —
+        # null-valued or not — exactly as TypeScript keeps both.
+        from ag_ui.core import StateDeltaEvent
+        wire = self._wire(
+            StateDeltaEvent.model_validate(
+                {
+                    "type": "STATE_DELTA",
+                    "delta": [
+                        {"op": "add", "path": "/x", "value": None, "vendor": None}
+                    ],
+                    "xTrace": None,
+                }
+            )
+        )
+        self.assertEqual(
+            wire["delta"][0],
+            {"op": "add", "path": "/x", "value": None, "vendor": None},
+        )
+        self.assertIn("xTrace", wire)
+        self.assertIsNone(wire["xTrace"])
+
+    def test_model_valued_extra_gets_the_same_walk(self):
+        # A caller can assign a MODEL into an extra field; pydantic serialises
+        # it recursively with exclude_none, so its required nulls need the
+        # same restoration as declared fields.
+        from ag_ui.core import CustomEvent, StepStartedEvent
+        outer = StepStartedEvent(step_name="s")
+        outer.vendor = CustomEvent(name="inner", value=None)
+        wire = self._wire(outer)
+        self.assertEqual(
+            wire["vendor"], {"type": "CUSTOM", "name": "inner", "value": None}
+        )
+
+    def test_model_nested_in_containers_gets_the_walk(self):
+        # Models can hide inside dicts and lists inside any-typed fields or
+        # extras; the walk descends arbitrary containers to reach them.
+        from ag_ui.core import CustomEvent, StepStartedEvent
+        outer = StepStartedEvent(step_name="s")
+        outer.vendor = {"wrapped": [CustomEvent(name="inner", value=None)]}
+        wire = self._wire(outer)
+        self.assertEqual(
+            wire["vendor"]["wrapped"][0],
+            {"type": "CUSTOM", "name": "inner", "value": None},
+        )
+
+    def test_root_model_extras_unwrap(self):
+        from pydantic import RootModel
+        from ag_ui.core import CustomEvent, StepStartedEvent
+        outer = StepStartedEvent(step_name="s")
+        outer.vendor = RootModel[list]([CustomEvent(name="inner", value=None)])
+        wire = self._wire(outer)
+        self.assertEqual(
+            wire["vendor"][0], {"type": "CUSTOM", "name": "inner", "value": None}
+        )
+
+    def test_null_under_a_metadata_key_is_data(self):
+        from ag_ui.core import TextMessageStartEvent
+        wire = self._wire(TextMessageStartEvent(message_id="m", metadata={"finish": None}))
+        self.assertEqual(wire["metadata"], {"finish": None})
+
+    def test_move_operation_keeps_the_rfc_member_name(self):
+        from ag_ui.core import StateDeltaEvent
+        event = StateDeltaEvent(
+            delta=[{"op": "move", "path": "/a", "from": "/b"}]
+        )
+        self.assertEqual(self._wire(event)["delta"][0]["from"], "/b")
+        # Plain dumps keep the RFC name too, so a delta handed to a JSON
+        # Patch library stays a valid operation.
+        self.assertEqual(event.model_dump()["delta"][0]["from"], "/b")

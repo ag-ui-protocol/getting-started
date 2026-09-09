@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AbstractAgent } from "@/agent";
 import { BaseEvent, EventType, RunAgentInput } from "@ag-ui/core";
 import { Observable, from, lastValueFrom, toArray } from "rxjs";
@@ -26,23 +26,21 @@ describe("BackwardCompatibility_0_0_47", () => {
     middleware = new BackwardCompatibility_0_0_47();
   });
 
-  const createInput = (messages: RunAgentInput["messages"]): RunAgentInput => ({
+  // Legacy message shapes: the binary content part left the Message type in
+  // 1.0, and feeding it anyway is this suite's entire purpose.
+  const createInput = (messages: unknown[]): RunAgentInput => ({
     threadId: "thread-1",
     runId: "run-1",
-    messages,
+    messages: messages as RunAgentInput["messages"],
     tools: [],
     context: [],
     forwardedProps: {},
   });
 
   it("passes through plain string content unchanged", async () => {
-    const agent = new MockAgent([
-      { type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
-    ]);
+    const agent = new MockAgent([{ type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" }]);
 
-    const input = createInput([
-      { id: "msg-1", role: "user", content: "hello world" },
-    ]);
+    const input = createInput([{ id: "msg-1", role: "user", content: "hello world" }]);
 
     await lastValueFrom(middleware.run(input, agent).pipe(toArray()));
 
@@ -353,5 +351,54 @@ describe("BackwardCompatibility_0_0_47", () => {
       type: "image",
       source: { type: "data", value: "base64data", mimeType: "image/png" },
     });
+  });
+});
+
+describe("BackwardCompatibility_0_0_47 (lossy path warning)", () => {
+  // The warning gates on SUPPRESS_TRANSFORMATION_WARNINGS, so the flag has to
+  // be off here whatever the ambient environment sets — and PUT BACK, because
+  // a bare `delete` leaks into every file vitest runs next in this worker.
+  // Same shape as backward-compatibility-0-0-57.test.ts.
+  let priorSuppress: string | undefined;
+  beforeEach(() => {
+    priorSuppress = process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+    delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+  });
+  afterEach(() => {
+    if (priorSuppress === undefined) {
+      delete process.env.SUPPRESS_TRANSFORMATION_WARNINGS;
+    } else {
+      process.env.SUPPRESS_TRANSFORMATION_WARNINGS = priorSuppress;
+    }
+  });
+
+  it("warns when an id-only binary part cannot be converted", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const middleware = new BackwardCompatibility_0_0_47();
+    const agent = new MockAgent([]);
+    const input = {
+      threadId: "t",
+      runId: "r",
+      state: {},
+      tools: [],
+      context: [],
+      forwardedProps: {},
+      messages: [
+        {
+          id: "msg-1",
+          role: "user",
+          content: [{ type: "binary", mimeType: "image/png", id: "asset-1" }],
+        },
+      ],
+    } as unknown as RunAgentInput;
+
+    await lastValueFrom(middleware.run(input, agent).pipe(toArray()), {
+      defaultValue: undefined,
+    });
+
+    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(warned).toContain("asset-1");
+    expect(warned).toContain("DEPRECATIONS.md");
+    warnSpy.mockRestore();
   });
 });

@@ -1,7 +1,8 @@
-import { TextMessageStartEventSchema, TextMessageChunkEventSchema, EventType } from "../events";
+import { EventType } from "../index";
+import { TextMessageStartEventSchema, TextMessageChunkEventSchema } from "../schemas";
 
 describe("Event role defaults", () => {
-  it("should default TextMessageStartEvent role to 'assistant' when not provided", () => {
+  it("leaves an absent TextMessageStartEvent role absent (absent means assistant)", () => {
     const eventData = {
       type: EventType.TEXT_MESSAGE_START,
       messageId: "test-msg",
@@ -12,7 +13,9 @@ describe("Event role defaults", () => {
     
     expect(parsed.type).toBe(EventType.TEXT_MESSAGE_START);
     expect(parsed.messageId).toBe("test-msg");
-    expect(parsed.role).toBe("assistant"); // Should default to assistant
+    // The schema documents the default in prose; validators do not
+    // materialise it, so absent stays absent and consumers apply the meaning.
+    expect(parsed.role).toBeUndefined();
   });
 
   it("should allow overriding the default role in TextMessageStartEvent", () => {
