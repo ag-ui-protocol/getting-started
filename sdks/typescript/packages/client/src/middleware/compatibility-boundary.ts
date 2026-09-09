@@ -70,10 +70,11 @@ function normalizeLegacyMessageNulls(message: unknown): unknown {
 
 /**
  * Normalize only whole optional nulls accepted by pre-1.0 request parsers.
- * Shared with RUN_STARTED.input and server request handlers, which can call
- * this before RunAgentInputSchema.parse without an agent/middleware pipeline.
+ * Used internally for RUN_STARTED.input; direct server request parsers do not
+ * pass through this event boundary and must handle compatibility locally.
  * This does not validate input or walk opaque application data. Invalid
  * values, including nulls forbidden on main, remain for the validator to reject.
+ * @internal
  */
 export function normalizeLegacyRunAgentInput(input: unknown): unknown {
   let normalized = omitLegacyNull(input, "forwardedProps", "RunAgentInput");
@@ -114,8 +115,8 @@ export function normalizeLegacyRunAgentInput(input: unknown): unknown {
  * - The three legacy nulls -> absent: parentMessageId on TOOL_CALL_START and
  *   TOOL_CALL_CHUNK, and RUN_FINISHED.outcome.
  * - Optional JSON payload nulls accepted before 1.0 -> absent: rawEvent,
- *   run/subagent result, media-part metadata, and the request fields handled
- *   by normalizeLegacyRunAgentInput. Required and nested data nulls survive.
+ *   run/subagent result, media-part metadata, and optional JSON request fields
+ *   inside RUN_STARTED.input. Required and nested data nulls survive.
  */
 export class CompatibilityBoundary extends Middleware {
   private currentReasoningId: string | null = null;

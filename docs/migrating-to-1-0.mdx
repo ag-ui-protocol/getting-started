@@ -60,9 +60,15 @@ to in-memory runs, reconnects, SSE, and protobuf, including messages and input
 echoes embedded in events. Subscribers receive the normalized event: for
 example, an old `RUN_FINISHED.result: null` becomes an absent result.
 
-Direct schema validation remains strict; request handlers accepting older
-`RunAgentInput` values can call `normalizeLegacyRunAgentInput` from
-`@ag-ui/client` before `RunAgentInputSchema.parse`. The existing
+Direct schema validation remains strict and does not invoke the client's event
+compatibility boundary. Request handlers accepting older `RunAgentInput` values
+must locally omit historically accepted optional nulls before calling
+`RunAgentInputSchema.parse`: `forwardedProps`, `tools[].parameters`,
+`resume[].payload`, and `metadata` on image/audio/video/document parts in
+`messages[].content[]`. Do not recursively strip nulls from application data or
+remove nulls from fields that already rejected them. CopilotKit's shared
+run/connect request parser handles this as a local compatibility exception;
+AG-UI does not expose a public request-normalization helper. The existing
 `RunAgentInput.state: null` parser tolerance still yields `undefined`.
 
 This compatibility is limited to historically accepted fields. Event or message

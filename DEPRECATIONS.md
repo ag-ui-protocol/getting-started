@@ -41,22 +41,24 @@ conversions.
 | `rawEvent: null` on an event                  | omit the field                                                          | inbound boundary                                                      | 2027-09-08 |
 | `result: null` on `RUN_FINISHED`              | omit the field                                                          | inbound boundary                                                      | 2027-09-08 |
 | `result: null` on `SUBAGENT_FINISHED`         | omit the field                                                          | inbound boundary                                                      | 2027-09-08 |
-| `payload: null` on a resume entry             | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
-| `metadata: null` on an `image` content part   | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
-| `metadata: null` on an `audio` content part   | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
-| `metadata: null` on a `video` content part    | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
-| `metadata: null` on a `document` content part | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
-| `parameters: null` on a tool                  | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
-| `forwardedProps: null` on `RunAgentInput`     | omit the field                                                          | inbound boundary / `normalizeLegacyRunAgentInput`                     | 2027-09-08 |
+| `payload: null` on a resume entry             | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
+| `metadata: null` on an `image` content part   | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
+| `metadata: null` on an `audio` content part   | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
+| `metadata: null` on a `video` content part    | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
+| `metadata: null` on a `document` content part | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
+| `parameters: null` on a tool                  | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
+| `forwardedProps: null` on `RunAgentInput`     | omit the field                                                          | inbound boundary (events)                                             | 2027-09-08 |
 
 The optional-null conversions preserve compatibility with shapes the previous
 SDK accepted. They run before validation on incoming events, including nested
 messages and `RUN_STARTED.input`, across in-memory runs, reconnects, SSE and
-protobuf. Request handlers can apply `normalizeLegacyRunAgentInput` from
-`@ag-ui/client` before parsing an incoming request. Canonical schemas still
-reject these whole optional nulls, and producer serializers omit them. The
-existing `RunAgentInput.state: null` parser tolerance continues to yield
-`undefined`.
+protobuf. Direct request parsing does not pass through this event boundary.
+Request handlers accepting older inputs must locally omit the listed optional
+nulls before strict validation; CopilotKit's shared run/connect parser is this
+explicit exception. The conversion helper remains internal to AG-UI, with no
+public request-normalization API. Canonical schemas still reject these whole
+optional nulls, and producer serializers omit them. The existing
+`RunAgentInput.state: null` parser tolerance continues to yield `undefined`.
 
 This is a selective compatibility list: event or message `metadata: null` and
 `parentRunId: null` already failed validation and remain invalid. Required JSON

@@ -5,7 +5,14 @@ import { EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/core";
 import { EventSchema, RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { decode } from "@ag-ui/proto";
 import { AbstractAgent, HttpAgent } from "@/agent";
-import { normalizeLegacyRunAgentInput } from "@/middleware";
+import * as clientApi from "@/index";
+import * as middlewareApi from "@/middleware";
+import { normalizeLegacyRunAgentInput } from "../compatibility-boundary";
+
+it("keeps legacy request normalization out of the public API", () => {
+  expect(clientApi).not.toHaveProperty("normalizeLegacyRunAgentInput");
+  expect(middlewareApi).not.toHaveProperty("normalizeLegacyRunAgentInput");
+});
 
 const ids = { threadId: "t", runId: "r" };
 const start = { type: EventType.RUN_STARTED, ...ids };
@@ -176,7 +183,7 @@ describe.each(["run", "connect", "sse"] as const)("legacy optional nulls through
   });
 });
 
-describe("the shared request compatibility helper", () => {
+describe("the internal request compatibility helper", () => {
   it("normalizes every legacy request position without changing application data or the caller's object", () => {
     const data = { metadata: null, payload: null, forwardedProps: null };
     const messages = (["image", "audio", "video", "document"] as const).map((type) => ({
