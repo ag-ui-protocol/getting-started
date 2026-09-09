@@ -1,9 +1,10 @@
-import { Subject } from "rxjs";
+import { ReplaySubject, Subject } from "rxjs";
 import { firstValueFrom } from "rxjs";
 import { take } from "rxjs/operators";
 import { transformHttpEventStream } from "../http";
 import { EventType } from "@ag-ui/core";
-import { HttpEvent, HttpEventType } from "../../run/http-request";
+import { HttpEvent, HttpEventType, runHttpRequest } from "../../run/http-request";
+import { MAX_BUFFER_SIZE } from "../sse";
 
 describe("transformHttpEventStream", () => {
   it("should emit events as soon as complete SSE events are encountered", async () => {
@@ -382,5 +383,322 @@ describe("transformHttpEventStream", () => {
       messageId: "1",
       delta: "Split JSON Test",
     });
+  });
+
+  it("should emit error when the SSE buffer exceeds the maximum size", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    const errors: any[] = [];
+    event$.subscribe({
+      next: () => {
+        expect.fail("Should not emit events for a stream with no event boundary");
+      },
+      error: (err) => errors.push(err),
+      complete: () => {
+        expect.fail("Stream should not complete once the buffer limit is passed");
+      },
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // A data line that never reaches a \n\n boundary, so the tail buffer keeps
+    // every character of it instead of releasing a completed event.
+    chunk$.next({
+      type: HttpEventType.DATA,
+      data: new TextEncoder().encode("A".repeat(MAX_BUFFER_SIZE + 1)),
+    });
+
+    // The check runs inside the DATA handler, so the failure is already
+    // delivered by the time the chunk above returns.
+    await Promise.resolve();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("SSE buffer size exceeded maximum limit");
+  });
+
+  it("should not emit error when the buffer reaches exactly the maximum size", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    let errored: any = null;
+    const settled = new Promise<void>((resolve) => {
+      event$.subscribe({
+        next: () => {},
+        error: (err) => {
+          errored = err;
+          resolve();
+        },
+        complete: () => resolve(),
+      });
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // Exactly at the limit is still allowed: the check is on passing it, not
+    // on reaching it.
+    chunk$.next({
+      type: HttpEventType.DATA,
+      data: new TextEncoder().encode("A".repeat(MAX_BUFFER_SIZE)),
+    });
+    chunk$.complete();
+
+    await settled;
+
+    expect(errored).toBeNull();
+  });
+
+  it("should not emit error when complete events exceed the limit in total", async () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+
+    const received: any[] = [];
+    let errored: any = null;
+    const settled = new Promise<void>((resolve) => {
+      event$.subscribe({
+        next: (event) => received.push(event),
+        error: (err) => {
+          errored = err;
+          resolve();
+        },
+        complete: () => resolve(),
+      });
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+
+    chunk$.next({
+      type: HttpEventType.HEADERS,
+      status: 200,
+      headers: headers,
+    });
+
+    // Every chunk carries one complete event, so the boundary releases the tail
+    // each time. The total crosses the limit; the live buffer never does.
+    const delta = "A".repeat(1024 * 1024);
+    const chunkCount = Math.floor(MAX_BUFFER_SIZE / delta.length) + 1;
+
+    for (let i = 0; i < chunkCount; i++) {
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: new TextEncoder().encode(
+          `data: {"type": "TEXT_MESSAGE_CONTENT", "messageId": "1", "delta": "${delta}"}\n\n`,
+        ),
+      });
+    }
+    chunk$.complete();
+
+    await settled;
+
+    expect(errored).toBeNull();
+    expect(received).toHaveLength(chunkCount);
+  });
+
+  // --- helpers for the chunk-boundary cases -------------------------------
+
+  const sseFrame = (delta: string) =>
+    `data: {"type": "TEXT_MESSAGE_CONTENT", "messageId": "1", "delta": "${delta}"}\n\n`;
+
+  const feed = (chunk$: Subject<HttpEvent>, text: string) => {
+    chunk$.next({ type: HttpEventType.DATA, data: new TextEncoder().encode(text) });
+  };
+
+  const openSseStream = () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+    const received: any[] = [];
+    const errors: any[] = [];
+    event$.subscribe({
+      next: (event) => received.push(event),
+      error: (err) => errors.push(err),
+      complete: () => {},
+    });
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+    chunk$.next({ type: HttpEventType.HEADERS, status: 200, headers });
+    return { chunk$, received, errors };
+  };
+
+  it("cancels the response body and stops reading once the cap trips", async () => {
+    const oneMiB = new TextEncoder().encode("A".repeat(1024 * 1024));
+    let cancelled = false;
+    let dataReads = 0;
+
+    const cancel = vi.fn(async () => {
+      cancelled = true;
+    });
+    const reader = {
+      read: vi.fn(async () => {
+        // A cancelled body stops yielding, which is what ends the transport's
+        // read loop. Without that the mock would read forever regardless of
+        // whether teardown fired.
+        if (cancelled) return { done: true, value: undefined };
+        // Bounded so that a regression which never cancels ends the run and
+        // fails on the assertions below instead of reading forever.
+        if (dataReads >= 40) return { done: true, value: undefined };
+        dataReads++;
+        return { done: false, value: oneMiB };
+      }),
+      cancel,
+    };
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+    const response = {
+      ok: true,
+      status: 200,
+      headers,
+      body: { getReader: () => reader },
+    };
+
+    const errors: any[] = [];
+    // Sampled inside the handler: taking it afterwards would race the read
+    // loop, which on a regression keeps going and reaches the bound before the
+    // assertion runs.
+    let readsAtFailure = -1;
+    transformHttpEventStream(runHttpRequest(async () => response as any)).subscribe({
+      next: () => {},
+      error: (err) => {
+        errors.push(err);
+        if (readsAtFailure < 0) readsAtFailure = dataReads;
+      },
+      complete: () => {},
+    });
+
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(errors).toHaveLength(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(dataReads).toBe(readsAtFailure);
+  });
+
+  it("parses identical events the same whether they arrive separately or in one read", () => {
+    // Each event is well under the cap; together they cross it. Only the way
+    // the transport grouped its reads differs between the two runs.
+    const half = "A".repeat(6 * 1024 * 1024);
+    const first = sseFrame(half);
+    const second = sseFrame(half);
+
+    const separate = openSseStream();
+    feed(separate.chunk$, first);
+    feed(separate.chunk$, second);
+    separate.chunk$.complete();
+
+    const combined = openSseStream();
+    feed(combined.chunk$, first + second);
+    combined.chunk$.complete();
+
+    expect(separate.errors).toHaveLength(0);
+    expect(combined.errors).toHaveLength(0);
+    expect(separate.received).toHaveLength(2);
+    expect(combined.received).toEqual(separate.received);
+  });
+
+  it("accepts a frame just below the cap when the read also carries the next event", () => {
+    // Sized so the framed event lands 16 bytes short of the limit, then split
+    // into a 32 KiB first read and 64 KiB reads after it, so the read that
+    // finishes the event also carries the start of the following one.
+    const overhead = sseFrame("").length;
+    const nearCap = sseFrame("B".repeat(MAX_BUFFER_SIZE - 16 - overhead));
+    const follower = sseFrame("tail");
+    const stream = nearCap + follower;
+
+    const { chunk$, received, errors } = openSseStream();
+
+    let offset = 0;
+    let size = 32 * 1024;
+    while (offset < stream.length) {
+      feed(chunk$, stream.slice(offset, offset + size));
+      offset += size;
+      size = 64 * 1024;
+    }
+    chunk$.complete();
+
+    expect(errors).toHaveLength(0);
+    expect(received).toHaveLength(2);
+    expect(received[1].delta).toBe("tail");
+  });
+
+  it("trips the guard on an oversized incomplete frame split across small reads", () => {
+    const { chunk$, errors } = openSseStream();
+
+    // No boundary anywhere, delivered in 64 KiB reads: the tail is what grows.
+    const read = "C".repeat(64 * 1024);
+    const reads = Math.ceil(MAX_BUFFER_SIZE / read.length) + 1;
+    for (let i = 0; i < reads && errors.length === 0; i++) {
+      feed(chunk$, read);
+    }
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("SSE buffer size exceeded maximum limit");
+  });
+
+  it("delivers a long healthy stream once and in order without retaining it", () => {
+    // The replay buffer lives inside transformHttpEventStream. Spying on
+    // ReplaySubject.next is the only handle on the instance it builds; a late
+    // subscriber then reports what that instance is still holding, through the
+    // public API rather than its internals.
+    const replaySpy = vi.spyOn(ReplaySubject.prototype as any, "next");
+
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+    const received: any[] = [];
+    const errors: any[] = [];
+    event$.subscribe({
+      next: (event) => received.push(event),
+      error: (err) => errors.push(err),
+      complete: () => {},
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+    chunk$.next({ type: HttpEventType.HEADERS, status: 200, headers });
+
+    const total = 50;
+    for (let i = 0; i < total; i++) {
+      // A distinct payload per read, so both order and duplication show up.
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: new TextEncoder().encode(
+          `data: {"type": "TEXT_MESSAGE_CONTENT", "messageId": "1", "delta": "chunk-${i}"}\n\n`,
+        ),
+      });
+    }
+
+    // Read while the stream is still open, which is when an unbounded buffer
+    // would be holding the download that has arrived so far.
+    const buffered = (replaySpy.mock as any).contexts[0] as ReplaySubject<HttpEvent>;
+    const replayed: HttpEvent[] = [];
+    buffered.subscribe((event) => replayed.push(event)).unsubscribe();
+    replaySpy.mockRestore();
+
+    expect(replayed).toHaveLength(1);
+
+    expect(errors).toHaveLength(0);
+    expect(received).toHaveLength(total);
+    // The first event after the headers is the one a replay buffer trimmed too
+    // far would drop.
+    expect(received[0].delta).toBe("chunk-0");
+    expect(received.map((e) => e.delta)).toEqual(
+      Array.from({ length: total }, (_, i) => `chunk-${i}`),
+    );
+
+    chunk$.complete();
   });
 });

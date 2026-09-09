@@ -3,6 +3,20 @@ import { HttpEvent, HttpEventType } from "../run/http-request";
 import { type DebugLoggerInput, resolveDebugLogger } from "@/debug-logger";
 
 /**
+ * Maximum size the framing buffer is allowed to reach before the stream fails.
+ *
+ * The buffer holds the tail after the last \n\n, so a response that never sends a
+ * boundary grows it to the size of the whole response. Mirrors
+ * SseParser::kMaxBufferSize in the C++ SDK
+ * (sdks/community/c++/src/stream/sse_parser.h), which caps the same
+ * accumulation at 10 MB.
+ *
+ * Counted in decoded characters rather than bytes, because the buffer is
+ * already a string at the point of the check.
+ */
+export const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
+
+/**
  * Parses a stream of HTTP events into a stream of JSON objects using Server-Sent Events (SSE) format.
  * Strictly follows the SSE standard where:
  * - Events are separated by double newlines ('\n\n')
@@ -43,6 +57,21 @@ export const parseSSEStream = (
 
         for (const event of events) {
           processSSEEvent(event);
+        }
+
+        // Measured on the tail that is left once completed events have been
+        // taken out, because that tail is the only thing here that can grow
+        // without bound. Measuring the incoming chunk instead would fail a
+        // read that merely carried two valid events across one boundary, and
+        // whether that happens is decided by how the transport grouped its
+        // reads rather than by anything the stream did wrong.
+        if (buffer.length > MAX_BUFFER_SIZE) {
+          jsonSubject.error(
+            new Error(
+              `SSE buffer size exceeded maximum limit of ${MAX_BUFFER_SIZE / (1024 * 1024)} MB`,
+            ),
+          );
+          return;
         }
       }
     },

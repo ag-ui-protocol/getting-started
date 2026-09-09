@@ -1,5 +1,5 @@
 import { BaseEvent, EventSchemas } from "@ag-ui/core";
-import { Subject, ReplaySubject, Observable } from "rxjs";
+import { Subject, ReplaySubject, Observable, Subscription } from "rxjs";
 import { HttpEvent, HttpEventType } from "../run/http-request";
 import { parseSSEStream } from "./sse";
 import { parseProtoStream } from "./proto";
@@ -17,14 +17,45 @@ export const transformHttpEventStream = (
   const log = resolveDebugLogger(debugLogger);
   const eventSubject = new Subject<BaseEvent>();
 
-  // Use ReplaySubject to buffer events until we decide on the parser
-  const bufferSubject = new ReplaySubject<HttpEvent>();
+  // Buffers events until the parser is chosen. One is enough: the parser is
+  // attached while the HEADERS event is being handled, so that event is all
+  // there is to replay and everything after it is passed through live. Left
+  // unbounded, this retained every chunk of the response — the whole download
+  // held in memory for the life of the run, on a healthy stream as much as on
+  // a failing one.
+  const bufferSubject = new ReplaySubject<HttpEvent>(1);
 
   // Flag to track whether we've set up the parser
   let parserInitialized = false;
 
+  // Erroring the output does not stop the upstream read on its own: the source
+  // subscription owns the teardown that cancels the HTTP reader, so without
+  // releasing it the transport keeps reading and the replay buffer keeps
+  // retaining chunks that nothing will ever consume.
+  //
+  // The parser can fail synchronously from inside subscribe(), before the
+  // handle below exists, so the intent is recorded and acted on as soon as it
+  // does.
+  let sourceSubscription: Subscription | undefined;
+  let teardownRequested = false;
+
+  const stopReading = () => {
+    teardownRequested = true;
+    sourceSubscription?.unsubscribe();
+  };
+
+  const failStream = (err: unknown) => {
+    stopReading();
+    eventSubject.error(err);
+  };
+
+  const finishStream = () => {
+    stopReading();
+    eventSubject.complete();
+  };
+
   // Subscribe to source and buffer events while we determine the content type
-  source$.subscribe({
+  sourceSubscription = source$.subscribe({
     next: (event: HttpEvent) => {
       // Forward event to buffer
       bufferSubject.next(event);
@@ -44,8 +75,8 @@ export const transformHttpEventStream = (
           // Use protocol buffer parser
           parseProtoStream(bufferSubject).subscribe({
             next: (event) => eventSubject.next(event),
-            error: (err) => eventSubject.error(err),
-            complete: () => eventSubject.complete(),
+            error: (err) => failStream(err),
+            complete: () => finishStream(),
           });
         } else {
           // Use SSE JSON parser for all other cases
@@ -60,7 +91,7 @@ export const transformHttpEventStream = (
                 eventSubject.next(parsedEvent as BaseEvent);
               } catch (err) {
                 log?.event("HTTP", "Event invalid:", { json, error: String(err) });
-                eventSubject.error(err);
+                failStream(err);
               }
             },
             error: (err) => {
@@ -71,16 +102,16 @@ export const transformHttpEventStream = (
                   code: "abort",
                   rawEvent: err,
                 });
-                eventSubject.complete();
+                finishStream();
                 return;
               }
-              return eventSubject.error(err);
+              return failStream(err);
             },
-            complete: () => eventSubject.complete(),
+            complete: () => finishStream(),
           });
         }
       } else if (!parserInitialized) {
-        eventSubject.error(new Error("No headers event received before data events"));
+        failStream(new Error("No headers event received before data events"));
       }
     },
     error: (err) => {
@@ -91,6 +122,12 @@ export const transformHttpEventStream = (
       bufferSubject.complete();
     },
   });
+
+  // Covers a parser that failed synchronously while subscribe() was still
+  // running, when there was no handle to release yet.
+  if (teardownRequested) {
+    sourceSubscription.unsubscribe();
+  }
 
   return eventSubject.asObservable();
 };
