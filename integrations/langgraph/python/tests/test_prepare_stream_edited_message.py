@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ag_ui.core import EventType, UserMessage
+from ag_ui.core import AssistantMessage, EventType, UserMessage
 
 from tests._helpers import make_agent
 
@@ -48,6 +48,7 @@ def _make_input(messages, thread_id="t1", forwarded_props=None):
     inp.tools = []
     inp.context = []
     inp.forwarded_props = forwarded_props or {}
+    inp.resume = None
     return inp
 
 
@@ -113,6 +114,49 @@ class TestDetectEditedHumanMessage(unittest.TestCase):
         self.assertIsNone(agent._detect_edited_human_message(incoming, checkpoint))
 
 
+class TestDetectRegeneratePlaceholder(unittest.TestCase):
+    """Direct tests for empty-assistant regenerate detection."""
+
+    def test_detects_empty_assistant_placeholder_after_checkpointed_user(self):
+        agent = make_agent()
+        checkpoint = [
+            HumanMessage(id="h1", content="hello"),
+            AIMessage(id="a1", content="hi"),
+        ]
+        incoming = [
+            HumanMessage(id="h1", content="hello"),
+            AIMessage(id="", content=""),
+        ]
+
+        result = agent._detect_regenerate_placeholder(incoming, checkpoint)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.id, "h1")
+
+    def test_ignores_placeholder_without_downstream_assistant_response(self):
+        agent = make_agent()
+        checkpoint = [HumanMessage(id="h1", content="hello")]
+        incoming = [
+            HumanMessage(id="h1", content="hello"),
+            AIMessage(id="", content=""),
+        ]
+
+        self.assertIsNone(agent._detect_regenerate_placeholder(incoming, checkpoint))
+
+    def test_ignores_non_empty_assistant_message(self):
+        agent = make_agent()
+        checkpoint = [
+            HumanMessage(id="h1", content="hello"),
+            AIMessage(id="a1", content="hi"),
+        ]
+        incoming = [
+            HumanMessage(id="h1", content="hello"),
+            AIMessage(id="a1", content="hi"),
+        ]
+
+        self.assertIsNone(agent._detect_regenerate_placeholder(incoming, checkpoint))
+
+
 class TestPrepareStreamRoutesEditedMessage(unittest.IsolatedAsyncioTestCase):
     """Integration-level tests: ``prepare_stream`` must route a detected
     edit to ``prepare_regenerate_stream`` and skip the normal flow."""
@@ -141,6 +185,35 @@ class TestPrepareStreamRoutesEditedMessage(unittest.IsolatedAsyncioTestCase):
         call_kwargs = agent.prepare_regenerate_stream.await_args.kwargs
         self.assertEqual(call_kwargs["message_checkpoint"].id, "h1")
         self.assertEqual(call_kwargs["message_checkpoint"].content, "What is 3+3?")
+        self.assertEqual(result, {"stream": "regen"})
+
+    async def test_empty_assistant_placeholder_routes_first_response_to_regenerate(self):
+        """Regenerating the first assistant response sends the same number of
+        messages as the checkpoint, so the count heuristic must not be the only
+        regenerate signal."""
+        agent = make_agent()
+        agent.active_run = {"id": "run-1", "mode": "start"}
+
+        checkpoint = [
+            HumanMessage(id="h1", content="Hello"),
+            AIMessage(id="a1", content="Hi there"),
+        ]
+        state = _make_state(messages=checkpoint, tasks=[FakeTask()])
+
+        incoming = [
+            UserMessage(id="h1", role="user", content="Hello"),
+            AssistantMessage(id="", role="assistant", content=""),
+        ]
+        inp = _make_input(messages=incoming)
+
+        agent.prepare_regenerate_stream = AsyncMock(return_value={"stream": "regen"})
+        config = {"configurable": {"thread_id": "t1"}}
+
+        result = await agent.prepare_stream(inp, state, config)
+
+        agent.prepare_regenerate_stream.assert_awaited_once()
+        call_kwargs = agent.prepare_regenerate_stream.await_args.kwargs
+        self.assertEqual(call_kwargs["message_checkpoint"].id, "h1")
         self.assertEqual(result, {"stream": "regen"})
 
     async def test_unchanged_messages_do_not_regenerate(self):

@@ -2247,6 +2247,17 @@ class LangGraphAgent:
                     config=config,
                 )
 
+            regenerate_placeholder = self._detect_regenerate_placeholder(
+                langchain_messages,
+                agent_state.values.get("messages", []),
+            )
+            if regenerate_placeholder:
+                return await self.prepare_regenerate_stream(
+                    input=input,
+                    message_checkpoint=regenerate_placeholder,
+                    config=config,
+                )
+
             non_system_messages = [msg for msg in langchain_messages if not isinstance(msg, SystemMessage)]
             if len(agent_state.values.get("messages", [])) > len(non_system_messages):
                 # Only trigger time-travel regeneration if the incoming messages are NOT already
@@ -2868,6 +2879,58 @@ class LangGraphAgent:
             if ckpt is not None and LangGraphAgent._normalized_content(ckpt.content) != LangGraphAgent._normalized_content(msg.content):
                 return msg
         return None
+
+    @staticmethod
+    def _detect_regenerate_placeholder(
+        incoming_messages: List[BaseMessage],
+        checkpoint_messages: List[BaseMessage],
+    ) -> Optional[HumanMessage]:
+        """Return the checkpointed user message preceding an empty assistant placeholder.
+
+        Regenerating the first assistant response can produce equal message
+        counts: checkpoint ``[Human, AI]`` and incoming ``[Human, empty AI]``.
+        The count-based heuristic below never sees that as time travel, so use
+        the explicit empty assistant placeholder as the regenerate signal.
+        """
+        non_system_incoming = [
+            msg for msg in incoming_messages if not isinstance(msg, SystemMessage)
+        ]
+        if len(non_system_incoming) < 2:
+            return None
+
+        placeholder = non_system_incoming[-1]
+        if not isinstance(placeholder, AIMessage):
+            return None
+        if placeholder.content or getattr(placeholder, "tool_calls", None):
+            return None
+
+        last_user_message: Optional[HumanMessage] = None
+        for candidate in reversed(non_system_incoming[:-1]):
+            if isinstance(candidate, HumanMessage):
+                last_user_message = candidate
+                break
+        if not last_user_message or not getattr(last_user_message, "id", None):
+            return None
+
+        checkpoint_messages_by_id = {
+            getattr(message, "id", None): message
+            for message in checkpoint_messages
+            if getattr(message, "id", None)
+        }
+        checkpoint_user = checkpoint_messages_by_id.get(last_user_message.id)
+        if not isinstance(checkpoint_user, HumanMessage):
+            return None
+
+        try:
+            user_index = checkpoint_messages.index(checkpoint_user)
+        except ValueError:
+            return None
+
+        has_downstream_ai = any(
+            isinstance(message, AIMessage)
+            for message in checkpoint_messages[user_index + 1:]
+        )
+        return last_user_message if has_downstream_ai else None
 
     def _interrupts_to_agui(self, lg_interrupts) -> List[AGUIInterrupt]:
         """Map LangGraph task interrupts to AG-UI Interrupts.
