@@ -1,5 +1,5 @@
 import { HttpEvent, HttpEventType, runHttpRequest } from "../../run/http-request";
-import { firstValueFrom, Subject, take } from "rxjs";
+import { firstValueFrom, ReplaySubject, Subject, take } from "rxjs";
 import {
   EventType,
   TextMessageStartEvent,
@@ -700,5 +700,55 @@ describe("parseProtoStream", () => {
     expect(errors).toHaveLength(0);
     expect(received).toHaveLength(2);
     expect((received[1] as TextMessageContentEvent).delta).toBe("tail");
+  });
+
+  it("delivers a long healthy stream once and in order without retaining it", () => {
+    const replaySpy = vi.spyOn(ReplaySubject.prototype as any, "next");
+
+    const chunk$ = new Subject<HttpEvent>();
+    const received: any[] = [];
+    const errors: any[] = [];
+    transformHttpEventStream(chunk$).subscribe({
+      next: (event) => received.push(event),
+      error: (err) => errors.push(err),
+      complete: () => {},
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+    chunk$.next({ type: HttpEventType.HEADERS, status: 200, headers });
+
+    const total = 50;
+    for (let i = 0; i < total; i++) {
+      // Each read is a distinct byte buffer, so order and duplication show up.
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: eventEncoder.encodeBinary({
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: "msg123",
+          delta: `chunk-${i}`,
+        }),
+      });
+    }
+
+    // Read while the stream is still open, which is when an unbounded buffer
+    // would be holding the download that has arrived so far.
+    const buffered = (replaySpy.mock as any).contexts[0] as ReplaySubject<HttpEvent>;
+    const replayed: HttpEvent[] = [];
+    buffered.subscribe((event) => replayed.push(event)).unsubscribe();
+    replaySpy.mockRestore();
+
+    expect(replayed).toHaveLength(1);
+
+    expect(errors).toHaveLength(0);
+    expect(received).toHaveLength(total);
+    // The first event after the headers is the one a replay buffer trimmed too
+    // far would drop.
+    expect((received[0] as TextMessageContentEvent).delta).toBe("chunk-0");
+    expect(received.map((e) => (e as TextMessageContentEvent).delta)).toEqual(
+      Array.from({ length: total }, (_, i) => `chunk-${i}`),
+    );
+
+    chunk$.complete();
   });
 });

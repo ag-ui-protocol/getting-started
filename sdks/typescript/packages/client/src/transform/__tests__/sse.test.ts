@@ -1,4 +1,4 @@
-import { Subject } from "rxjs";
+import { ReplaySubject, Subject } from "rxjs";
 import { firstValueFrom } from "rxjs";
 import { take } from "rxjs/operators";
 import { transformHttpEventStream } from "../http";
@@ -647,5 +647,58 @@ describe("transformHttpEventStream", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain("SSE buffer size exceeded maximum limit");
+  });
+
+  it("delivers a long healthy stream once and in order without retaining it", () => {
+    // The replay buffer lives inside transformHttpEventStream. Spying on
+    // ReplaySubject.next is the only handle on the instance it builds; a late
+    // subscriber then reports what that instance is still holding, through the
+    // public API rather than its internals.
+    const replaySpy = vi.spyOn(ReplaySubject.prototype as any, "next");
+
+    const chunk$ = new Subject<HttpEvent>();
+    const event$ = transformHttpEventStream(chunk$);
+    const received: any[] = [];
+    const errors: any[] = [];
+    event$.subscribe({
+      next: (event) => received.push(event),
+      error: (err) => errors.push(err),
+      complete: () => {},
+    });
+
+    const headers = new Headers();
+    headers.append("Content-Type", "text/event-stream");
+    chunk$.next({ type: HttpEventType.HEADERS, status: 200, headers });
+
+    const total = 50;
+    for (let i = 0; i < total; i++) {
+      // A distinct payload per read, so both order and duplication show up.
+      chunk$.next({
+        type: HttpEventType.DATA,
+        data: new TextEncoder().encode(
+          `data: {"type": "TEXT_MESSAGE_CONTENT", "messageId": "1", "delta": "chunk-${i}"}\n\n`,
+        ),
+      });
+    }
+
+    // Read while the stream is still open, which is when an unbounded buffer
+    // would be holding the download that has arrived so far.
+    const buffered = (replaySpy.mock as any).contexts[0] as ReplaySubject<HttpEvent>;
+    const replayed: HttpEvent[] = [];
+    buffered.subscribe((event) => replayed.push(event)).unsubscribe();
+    replaySpy.mockRestore();
+
+    expect(replayed).toHaveLength(1);
+
+    expect(errors).toHaveLength(0);
+    expect(received).toHaveLength(total);
+    // The first event after the headers is the one a replay buffer trimmed too
+    // far would drop.
+    expect(received[0].delta).toBe("chunk-0");
+    expect(received.map((e) => e.delta)).toEqual(
+      Array.from({ length: total }, (_, i) => `chunk-${i}`),
+    );
+
+    chunk$.complete();
   });
 });

@@ -17,8 +17,13 @@ export const transformHttpEventStream = (
   const log = resolveDebugLogger(debugLogger);
   const eventSubject = new Subject<BaseEvent>();
 
-  // Use ReplaySubject to buffer events until we decide on the parser
-  const bufferSubject = new ReplaySubject<HttpEvent>();
+  // Buffers events until the parser is chosen. One is enough: the parser is
+  // attached while the HEADERS event is being handled, so that event is all
+  // there is to replay and everything after it is passed through live. Left
+  // unbounded, this retained every chunk of the response — the whole download
+  // held in memory for the life of the run, on a healthy stream as much as on
+  // a failing one.
+  const bufferSubject = new ReplaySubject<HttpEvent>(1);
 
   // Flag to track whether we've set up the parser
   let parserInitialized = false;
