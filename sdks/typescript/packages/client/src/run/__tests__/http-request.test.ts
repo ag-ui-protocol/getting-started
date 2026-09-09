@@ -1,11 +1,71 @@
 import { runHttpRequest, HttpEventType } from "../http-request";
-import { describe, it, expect, vi, beforeEach, Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
 
 describe("runHttpRequest", () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
     fetchMock = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [new DOMException("Aborted", "AbortError"), false],
+    [new Error("Socket closed"), true],
+  ])("handles cancellation rejection during unsubscribe: %s", async (failure, shouldWarn) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const reader = {
+      read: vi.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>(() => {})),
+      cancel: vi.fn().mockRejectedValue(failure),
+    };
+    const response = {
+      ok: true, status: 200, headers: new Headers(),
+      body: { getReader: () => reader },
+    } as unknown as Response;
+    const onError = vi.fn();
+    const subscription = runHttpRequest(async () => response).subscribe({ error: onError });
+    try {
+      await vi.waitFor(() => expect(reader.read).toHaveBeenCalledOnce());
+      subscription.unsubscribe();
+      // Let the cancellation rejection and Node's unhandled-rejection checkpoint run.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(reader.cancel).toHaveBeenCalledOnce();
+      expect(onError).not.toHaveBeenCalled();
+      expect(unhandled).not.toHaveBeenCalled();
+      if (shouldWarn) {
+        expect(warn).toHaveBeenCalledExactlyOnceWith("Failed to cancel HTTP response reader:", failure);
+      } else {
+        expect(warn).not.toHaveBeenCalled();
+      }
+    } finally {
+      subscription.unsubscribe();
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  it("preserves the original read error when cancellation also fails", async () => {
+    const readError = new Error("Connection terminated");
+    const cancelError = new Error("Reader already errored");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const reader = {
+      read: vi.fn().mockRejectedValue(readError),
+      cancel: vi.fn().mockRejectedValue(cancelError),
+    };
+    const response = {
+      ok: true, status: 200, headers: new Headers(),
+      body: { getReader: () => reader },
+    } as unknown as Response;
+    const error = await new Promise((resolve) => {
+      runHttpRequest(async () => response).subscribe({ error: resolve });
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(error).toBe(readError);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Failed to cancel HTTP response reader:", cancelError);
   });
 
   it("should call the provided fetch thunk", async () => {
@@ -20,7 +80,7 @@ describe("runHttpRequest", () => {
       body: {
         getReader: vi.fn().mockReturnValue({
           read: vi.fn().mockResolvedValue({ done: true }),
-          cancel: vi.fn(),
+          cancel: vi.fn().mockResolvedValue(undefined),
         }),
       },
     };
@@ -59,7 +119,7 @@ describe("runHttpRequest", () => {
         .mockResolvedValueOnce({ done: false, value: chunk1 })
         .mockResolvedValueOnce({ done: false, value: chunk2 })
         .mockResolvedValueOnce({ done: true }),
-      cancel: vi.fn(),
+      cancel: vi.fn().mockResolvedValue(undefined),
     };
 
     // Mock response with our custom reader and headers
