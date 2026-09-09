@@ -1,5 +1,5 @@
 import { Observable, from, defer, throwError } from "rxjs";
-import { mergeMap, switchMap } from "rxjs/operators";
+import { switchMap } from "rxjs/operators";
 
 export enum HttpEventType {
   HEADERS = "headers",
@@ -26,22 +26,7 @@ export const runHttpRequest = (
   return defer(() => from(fetchResponse())).pipe(
     switchMap((response) => {
       if (!response.ok) {
-        const contentType = response.headers.get("content-type") || "";
-        // Read the (small) error body once, then error the stream
-        return from(response.text()).pipe(
-          mergeMap((text) => {
-            let payload: unknown = text;
-            if (contentType.includes("application/json")) {
-              try { payload = JSON.parse(text); } catch {/* keep raw text */}
-            }
-            const err: Error & { status?: number; payload?: unknown } = new Error(
-              `HTTP ${response.status}: ${typeof payload === "string" ? payload : JSON.stringify(payload)}`
-            );
-            err.status = response.status;
-            err.payload = payload;
-            return throwError(() => err);
-          })
-        );
+        return readHttpError(response);
       }
       // Emit headers event first
       const headersEvent: HttpHeadersEvent = {
@@ -90,3 +75,80 @@ export const runHttpRequest = (
     }),
   );
 };
+
+// Bound both the decoded payload and the diagnostic copied into the message.
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
+const MAX_ERROR_MESSAGE_CHARS = 4 * 1024;
+const TRUNCATED = " [truncated]";
+
+function readHttpError(response: Response): Observable<never> {
+  return new Observable((subscriber) => {
+    const reader = response.body?.getReader();
+    let finished = false;
+    let cancelled = false;
+    const cancel = () => {
+      if (reader && !finished && !cancelled) {
+        cancelled = true;
+        // Cleanup must not replace the HTTP error or produce an unhandled rejection.
+        void reader.cancel().catch(() => {});
+      }
+    };
+
+    void (async () => {
+      let text = "";
+      let truncated = false;
+      const decoder = new TextDecoder();
+      try {
+        let bytes = 0;
+        if (reader) {
+          while (!subscriber.closed) {
+            const { done, value } = await reader.read();
+            if (subscriber.closed) return;
+            if (done) {
+              finished = true;
+              text += decoder.decode();
+              break;
+            }
+            const accepted = value.subarray(0, MAX_ERROR_BODY_BYTES - bytes);
+            text += decoder.decode(accepted, { stream: true });
+            bytes += accepted.byteLength;
+            if (bytes === MAX_ERROR_BODY_BYTES) {
+              // Do not fetch another chunk to probe for EOF, or flush an
+              // incomplete UTF-8 character at the preview boundary.
+              truncated = true;
+              cancel();
+              break;
+            }
+          }
+        }
+        if (subscriber.closed) return;
+        let payload: unknown = text;
+        if (truncated) {
+          payload = text + TRUNCATED;
+        } else if (response.headers.get("content-type")?.includes("application/json")) {
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            // Preserve the readable text for non-JSON error responses.
+          }
+        }
+        const detail = typeof payload === "string" ? payload : JSON.stringify(payload);
+        const excerpt = detail.length > MAX_ERROR_MESSAGE_CHARS
+          ? detail.slice(0, MAX_ERROR_MESSAGE_CHARS) + TRUNCATED
+          : detail;
+        const error: Error & { status?: number; payload?: unknown } = new Error(
+          `HTTP ${response.status}: ${excerpt}`,
+        );
+        error.status = response.status;
+        error.payload = payload;
+        subscriber.error(error);
+      } catch (error) {
+        subscriber.error(error);
+      } finally {
+        cancel();
+        reader?.releaseLock();
+      }
+    })();
+    return cancel;
+  });
+}

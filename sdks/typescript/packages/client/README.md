@@ -76,3 +76,18 @@ Bug reports and pull requests are welcome! Please read our [contributing guide](
 ## License
 
 MIT © 2025 AG-UI Protocol Contributors
+
+## HTTP error response limits
+
+For non-success HTTP responses, the client streams at most 64 KiB of body bytes
+into a diagnostic preview before UTF-8 decoding. Once the budget is reached it
+cancels the reader without waiting for another chunk or EOF; an incomplete UTF-8
+character at the boundary is omitted. The payload remains a string with a
+` [truncated]` suffix, including when the body is exactly 64 KiB. Complete JSON
+bodies below the limit retain their structured `error.payload` behavior. The
+HTTP status remains available as `error.status`.
+
+The body detail embedded in `error.message` is independently limited to 4,096
+characters plus a truncation marker. Large error responses previously retained
+in full are now previews. The byte budget bounds retained content; a single
+chunk supplied by the underlying stream can already exceed that budget.

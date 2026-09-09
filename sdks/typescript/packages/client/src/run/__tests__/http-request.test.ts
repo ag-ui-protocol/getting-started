@@ -20,7 +20,7 @@ describe("runHttpRequest", () => {
       body: {
         getReader: vi.fn().mockReturnValue({
           read: vi.fn().mockResolvedValue({ done: true }),
-          cancel: vi.fn(),
+          cancel: vi.fn().mockResolvedValue(undefined),
         }),
       },
     };
@@ -59,7 +59,7 @@ describe("runHttpRequest", () => {
         .mockResolvedValueOnce({ done: false, value: chunk1 })
         .mockResolvedValueOnce({ done: false, value: chunk2 })
         .mockResolvedValueOnce({ done: true }),
-      cancel: vi.fn(),
+      cancel: vi.fn().mockResolvedValue(undefined),
     };
 
     // Mock response with our custom reader and headers
@@ -120,13 +120,8 @@ describe("runHttpRequest", () => {
 
     const mockText = '{"message":"User not found"}';
 
-    const mockResponse = {
-      ok: false,
-      status: 404,
-      headers: mockHeaders,
-      // our error-path reads .text() (not streaming)
-      text: vi.fn().mockResolvedValue(mockText),
-    } as unknown as Response;
+    const mockResponse = new Response(mockText, { status: 404, headers: mockHeaders });
+    const textSpy = vi.spyOn(mockResponse, "text");
 
     // Override fetch for this test
     fetchMock.mockResolvedValue(mockResponse);
@@ -158,7 +153,114 @@ describe("runHttpRequest", () => {
     // Should not have emitted any data events on error short-circuit
     expect(nextSpy).not.toHaveBeenCalled();
 
-    // Ensure we read the error body exactly once
-    expect((mockResponse as any).text).toHaveBeenCalledTimes(1);
+    expect(textSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("bounded HTTP error bodies", () => {
+  const cap = 64 * 1024;
+  const encoder = new TextEncoder();
+  const errorFrom = (response: Response) => new Promise<Error & { status: number; payload: unknown }>((resolve, reject) => {
+    runHttpRequest(async () => response).subscribe({
+      next: () => reject(new Error("Unexpected event")),
+      complete: () => reject(new Error("Unexpected completion")),
+      error: resolve,
+    });
+  });
+
+  function streamingError(chunks: Uint8Array[], contentType = "text/plain", cancel = vi.fn()) {
+    let index = 0;
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      if (index < chunks.length) controller.enqueue(chunks[index++]);
+      else controller.close();
+    });
+    const body = new ReadableStream({ pull, cancel }, { highWaterMark: 0 });
+    return { response: new Response(body, { status: 500, headers: { "content-type": contentType } }), pull, cancel };
+  }
+
+  it("caps an oversized chunk and retains bounded payload and message previews", async () => {
+    const { response, pull, cancel } = streamingError([encoder.encode("x".repeat(cap * 4)), encoder.encode("never read")]);
+    const error = await errorFrom(response);
+    expect(error.status).toBe(500);
+    expect(error.payload).toBe("x".repeat(cap) + " [truncated]");
+    expect(error.message).toBe("HTTP 500: " + "x".repeat(4096) + " [truncated]");
+    expect(pull).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it("stops pulling an unbounded stream once the byte budget is reached", async () => {
+    const cancel = vi.fn();
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      controller.enqueue(encoder.encode("x".repeat(1024)));
+    });
+    const response = new Response(new ReadableStream({ pull, cancel }, { highWaterMark: 0 }), { status: 503 });
+    const error = await errorFrom(response);
+    expect(error.status).toBe(503);
+    expect(pull).toHaveBeenCalledTimes(64);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(String(error.payload).length).toBe(cap + " [truncated]".length);
+  });
+
+  it("decodes multibyte UTF-8 split across chunks", async () => {
+    const bytes = encoder.encode("你😀");
+    const { response } = streamingError([bytes.subarray(0, 1), bytes.subarray(1, 5), bytes.subarray(5)]);
+    expect((await errorFrom(response)).payload).toBe("你😀");
+  });
+
+  it("does not emit half a UTF-8 character at the cap", async () => {
+    const { response } = streamingError([encoder.encode("x".repeat(cap - 1) + "你")]);
+    expect((await errorFrom(response)).payload).toBe("x".repeat(cap - 1) + " [truncated]");
+  });
+
+  it("keeps oversized JSON as a marked string rather than parsing a partial document", async () => {
+    const { response } = streamingError([encoder.encode(JSON.stringify({ message: "x".repeat(cap) }))], "application/json");
+    const error = await errorFrom(response);
+    expect(typeof error.payload).toBe("string");
+    expect(String(error.payload)).toHaveLength(cap + " [truncated]".length);
+    expect(error.status).toBe(500);
+  });
+
+  it.each(["plain failure", "{invalid json", "", "x".repeat(cap - 1)])("preserves complete bodies below the cap (%#)", async (text) => {
+    const { response, cancel } = streamingError([encoder.encode(text)], "application/json");
+    expect((await errorFrom(response)).payload).toBe(text);
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("marks an exact-cap body without waiting for another read", async () => {
+    const { response, pull, cancel } = streamingError([encoder.encode("x".repeat(cap))]);
+    expect((await errorFrom(response)).payload).toBe("x".repeat(cap) + " [truncated]");
+    expect(pull).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("reports the HTTP status for a missing body", async () => {
+    const error = await errorFrom(new Response(null, { status: 502 }));
+    expect(error.status).toBe(502);
+    expect(error.payload).toBe("");
+    expect(error.message).toBe("HTTP 502: ");
+  });
+
+  it("does not replace an HTTP error when cancellation rejects", async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error("Cancel failed"));
+    const { response } = streamingError([new Uint8Array(cap)], "text/plain", cancel);
+    const error = await errorFrom(response);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(error.status).toBe(500);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a pending error body when unsubscribed", async () => {
+    const cancel = vi.fn();
+    const pull = vi.fn();
+    const response = new Response(new ReadableStream({ pull, cancel }, { highWaterMark: 0 }), { status: 500 });
+    const onError = vi.fn();
+    const subscription = runHttpRequest(async () => response).subscribe({ error: onError });
+    await vi.waitFor(() => expect(pull).toHaveBeenCalledOnce());
+    subscription.unsubscribe();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
+    expect(response.body?.locked).toBe(false);
   });
 });
