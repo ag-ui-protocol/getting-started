@@ -14,7 +14,8 @@ import type { A2UIValidationCatalog } from "./validate";
 export const A2UI_OPERATIONS_KEY = "a2ui_operations";
 
 /** Default catalog id used when the subagent does not specify one. */
-export const BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/basic_catalog.json";
+// Canonical $id declared by the A2UI v0.9 basic catalog specification.
+export const BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json";
 
 /** A single A2UI v0.9 server-to-client operation. */
 export type A2UIOperation = Record<string, unknown>;
