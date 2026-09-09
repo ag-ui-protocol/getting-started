@@ -87,6 +87,55 @@ class TestSessionManagerDirectLookup:
             spy.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_find_session_by_thread_id_uses_direct_lookup(
+        self, manager, session_service
+    ):
+        """Cold-cache recovery should look up the thread ID without scanning."""
+        await manager.get_or_create_session(
+            thread_id="thread-cold-cache",
+            app_name="app1",
+            user_id="user1",
+        )
+
+        with (
+            patch.object(
+                session_service,
+                "get_session",
+                wraps=session_service.get_session,
+            ) as get_session,
+            patch.object(
+                session_service,
+                "list_sessions",
+                wraps=session_service.list_sessions,
+            ) as list_sessions,
+            patch.object(
+                manager,
+                "_cache_session",
+                wraps=manager._cache_session,
+            ) as cache_session,
+        ):
+            session = await manager._find_session_by_thread_id(
+                app_name="app1",
+                user_id="user1",
+                thread_id="thread-cold-cache",
+            )
+
+        assert session is not None
+        assert session.id == "thread-cold-cache"
+        get_session.assert_awaited_once_with(
+            session_id="thread-cold-cache",
+            app_name="app1",
+            user_id="user1",
+        )
+        list_sessions.assert_not_called()
+        cache_session.assert_called_once_with(
+            "thread-cold-cache",
+            "app1",
+            "user1",
+            session,
+        )
+
+    @pytest.mark.asyncio
     async def test_stores_thread_id_in_state(self, manager, session_service):
         """Even with direct lookup, thread_id metadata is stored in state."""
         session, _ = await manager.get_or_create_session(

@@ -317,11 +317,11 @@ class SessionManager:
         user_id: str,
         thread_id: str
     ) -> Optional[Any]:
-        """Find existing session by thread_id stored in session state.
+        """Find an existing session for an AG-UI thread ID.
 
-        This is the recovery path after middleware restart. Since we always let
-        the backend generate session_id, we can only find existing sessions by
-        searching their state for _ag_ui_thread_id.
+        When thread IDs are also session IDs, use a direct lookup. Otherwise,
+        recover backend-generated session IDs by scanning session state for
+        _ag_ui_thread_id.
 
         Args:
             app_name: Application name
@@ -331,6 +331,9 @@ class SessionManager:
         Returns:
             Session object if found, None otherwise
         """
+        if self._use_thread_id_as_session_id:
+            return await self.get_session(thread_id, app_name, user_id)
+
         if hasattr(self._session_service, 'list_sessions'):
             try:
                 response = await self._session_service.list_sessions(
