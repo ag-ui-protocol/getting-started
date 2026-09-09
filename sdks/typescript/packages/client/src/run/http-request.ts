@@ -83,7 +83,8 @@ export const runHttpRequest = (
               return;
             }
 
-            throw error;
+            // Teardown has no subscriber left to receive this error.
+            console.warn("Failed to cancel HTTP response reader:", error);
           });
         };
       });
