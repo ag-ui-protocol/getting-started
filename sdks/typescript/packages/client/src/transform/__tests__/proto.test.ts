@@ -1,4 +1,4 @@
-import { HttpEvent, HttpEventType } from "../../run/http-request";
+import { HttpEvent, HttpEventType, runHttpRequest } from "../../run/http-request";
 import { firstValueFrom, Subject, take } from "rxjs";
 import {
   EventType,
@@ -496,8 +496,9 @@ describe("parseProtoStream", () => {
       headers: headers,
     });
 
-    // A length prefix naming a message far larger than anything that will
-    // arrive, so processBuffer keeps waiting while the buffer keeps growing.
+    // A length prefix naming a message larger than the limit. The frame is
+    // judged by what it declares, so this is rejected on the read that carries
+    // the prefix rather than after accumulating a limit's worth of body.
     const lengthPrefix = new Uint8Array(4);
     new DataView(lengthPrefix.buffer).setUint32(0, 0xffffffff, false);
 
@@ -506,22 +507,10 @@ describe("parseProtoStream", () => {
       data: lengthPrefix,
     });
 
-    const filler = new Uint8Array(1024 * 1024);
-    const chunkCount = Math.floor(MAX_BUFFER_SIZE / filler.length) + 1;
-
-    for (let i = 0; i < chunkCount; i++) {
-      chunk$.next({
-        type: HttpEventType.DATA,
-        data: filler,
-      });
-    }
-
-    // The check runs inside the DATA handler, so the failure is already
-    // delivered by the time the last chunk above returns.
     await Promise.resolve();
 
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toContain("Protobuf buffer size exceeded maximum limit");
+    expect(errors[0].message).toContain("Protobuf message size exceeded maximum limit");
   });
 
   it("should not emit error when complete messages exceed the limit in total", async () => {
@@ -571,5 +560,145 @@ describe("parseProtoStream", () => {
 
     expect(errored).toBeNull();
     expect(received).toHaveLength(chunkCount);
+  });
+
+  // --- helpers for the chunk-boundary cases -------------------------------
+
+  const concatBytes = (parts: Uint8Array[]) => {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(total);
+    let at = 0;
+    for (const part of parts) {
+      out.set(part, at);
+      at += part.length;
+    }
+    return out;
+  };
+
+  const openProtoStream = () => {
+    const chunk$ = new Subject<HttpEvent>();
+    const received: any[] = [];
+    const errors: any[] = [];
+    transformHttpEventStream(chunk$).subscribe({
+      next: (event) => received.push(event),
+      error: (err) => errors.push(err),
+      complete: () => {},
+    });
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+    chunk$.next({ type: HttpEventType.HEADERS, status: 200, headers });
+    return { chunk$, received, errors };
+  };
+
+  it("cancels the response body and stops reading once the cap trips", async () => {
+    // A prefix that declares more than the limit, then a body that keeps
+    // arriving. The guard fires on the prefix; nothing should be read after.
+    const prefix = new Uint8Array(4);
+    new DataView(prefix.buffer).setUint32(0, 0xffffffff, false);
+    const body = new Uint8Array(1024 * 1024);
+
+    let cancelled = false;
+    let dataReads = 0;
+
+    const cancel = vi.fn(async () => {
+      cancelled = true;
+    });
+    const reader = {
+      read: vi.fn(async () => {
+        // A cancelled body stops yielding, which is what ends the transport's
+        // read loop; without that the mock would read on regardless of
+        // whether teardown fired.
+        if (cancelled) return { done: true, value: undefined };
+        // Bounded so that a regression which never cancels ends the run and
+        // fails on the assertions below instead of reading forever.
+        if (dataReads >= 40) return { done: true, value: undefined };
+        dataReads++;
+        return { done: false, value: dataReads === 1 ? prefix : body };
+      }),
+      cancel,
+    };
+
+    const headers = new Headers();
+    headers.append("Content-Type", proto.AGUI_MEDIA_TYPE);
+    const response = {
+      ok: true,
+      status: 200,
+      headers,
+      body: { getReader: () => reader },
+    };
+
+    const errors: any[] = [];
+    // Sampled inside the handler: taking it afterwards would race the read
+    // loop, which on a regression keeps going and reaches the bound before the
+    // assertion runs.
+    let readsAtFailure = -1;
+    transformHttpEventStream(runHttpRequest(async () => response as any)).subscribe({
+      next: () => {},
+      error: (err) => {
+        errors.push(err);
+        if (readsAtFailure < 0) readsAtFailure = dataReads;
+      },
+      complete: () => {},
+    });
+
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(errors).toHaveLength(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(dataReads).toBe(readsAtFailure);
+  });
+
+  it("decodes identical messages the same whether they arrive separately or in one read", () => {
+    // Each message is well under the cap; together they cross it. Only the way
+    // the transport grouped its reads differs between the two runs.
+    const half = eventEncoder.encodeBinary({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "msg123",
+      delta: "A".repeat(6 * 1024 * 1024),
+    });
+
+    const separate = openProtoStream();
+    separate.chunk$.next({ type: HttpEventType.DATA, data: half });
+    separate.chunk$.next({ type: HttpEventType.DATA, data: half });
+    separate.chunk$.complete();
+
+    const combined = openProtoStream();
+    combined.chunk$.next({ type: HttpEventType.DATA, data: concatBytes([half, half]) });
+    combined.chunk$.complete();
+
+    expect(separate.errors).toHaveLength(0);
+    expect(combined.errors).toHaveLength(0);
+    expect(separate.received).toHaveLength(2);
+    expect(combined.received).toEqual(separate.received);
+  });
+
+  it("accepts a frame just below the cap when reads straddle its boundary", () => {
+    const nearCap = eventEncoder.encodeBinary({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "msg123",
+      delta: "B".repeat(MAX_BUFFER_SIZE - 64 * 1024),
+    });
+    const follower = eventEncoder.encodeBinary({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: "msg123",
+      delta: "tail",
+    });
+    const stream = concatBytes([nearCap, follower]);
+
+    const { chunk$, received, errors } = openProtoStream();
+
+    let offset = 0;
+    let size = 32 * 1024;
+    while (offset < stream.length) {
+      chunk$.next({ type: HttpEventType.DATA, data: stream.slice(offset, offset + size) });
+      offset += size;
+      size = 64 * 1024;
+    }
+    chunk$.complete();
+
+    expect(errors).toHaveLength(0);
+    expect(received).toHaveLength(2);
+    expect((received[1] as TextMessageContentEvent).delta).toBe("tail");
   });
 });

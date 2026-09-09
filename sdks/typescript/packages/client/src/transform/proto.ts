@@ -8,8 +8,9 @@ import * as proto from "@ag-ui/proto";
  *
  * processBuffer waits until the buffer holds the whole message named by the
  * 4-byte length prefix, so a prefix that is never satisfied grows the buffer
- * without bound. Mirrors SseParser::kMaxBufferSize in the C++ SDK
- * (sdks/community/c++/src/stream/sse_parser.h), which caps the same
+ * without bound. Enforced against the length each frame declares, which bounds
+ * the buffer to a single frame. Mirrors SseParser::kMaxBufferSize in the C++
+ * SDK (sdks/community/c++/src/stream/sse_parser.h), which caps the same
  * accumulation at 10 MB.
  */
 export const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
@@ -30,17 +31,6 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
       }
 
       if (event.type === HttpEventType.DATA && event.data) {
-        // Checked before the allocation, so the buffer never passes the limit
-        // even briefly.
-        if (buffer.length + event.data.length > MAX_BUFFER_SIZE) {
-          eventSubject.error(
-            new Error(
-              `Protobuf buffer size exceeded maximum limit of ${MAX_BUFFER_SIZE / (1024 * 1024)} MB`,
-            ),
-          );
-          return;
-        }
-
         // Append the new data to our buffer
         const newBuffer = new Uint8Array(buffer.length + event.data.length);
         newBuffer.set(buffer, 0);
@@ -77,6 +67,21 @@ export const parseProtoStream = (source$: Observable<HttpEvent>): Observable<Bas
 
       // Check if we have the complete message (header + message body)
       const totalLength = 4 + messageLength;
+
+      // A frame is judged by the size its own prefix declares, before waiting
+      // for those bytes to arrive. That bounds the buffer to one frame and
+      // rejects an unsatisfiable prefix on the first read that carries it,
+      // where a check on the accumulated buffer would instead fail a read that
+      // merely carried two valid messages at once.
+      if (totalLength > MAX_BUFFER_SIZE) {
+        eventSubject.error(
+          new Error(
+            `Protobuf message size exceeded maximum limit of ${MAX_BUFFER_SIZE / (1024 * 1024)} MB`,
+          ),
+        );
+        return;
+      }
+
       if (buffer.length < totalLength) {
         // Not enough data yet, wait for more
         break;

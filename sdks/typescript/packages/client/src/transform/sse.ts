@@ -48,19 +48,6 @@ export const parseSSEStream = (
       if (event.type === HttpEventType.DATA && event.data) {
         // Decode chunk carefully to handle UTF-8
         const text = decoder.decode(event.data, { stream: true });
-
-        // Checked before the append, so the buffer never passes the limit even
-        // briefly. The tail is the only accumulator here: without a boundary it
-        // is never released, so one check covers the whole decoder.
-        if (buffer.length + text.length > MAX_BUFFER_SIZE) {
-          jsonSubject.error(
-            new Error(
-              `SSE buffer size exceeded maximum limit of ${MAX_BUFFER_SIZE / (1024 * 1024)} MB`,
-            ),
-          );
-          return;
-        }
-
         buffer += text;
 
         // Process complete events (separated by double newlines)
@@ -70,6 +57,21 @@ export const parseSSEStream = (
 
         for (const event of events) {
           processSSEEvent(event);
+        }
+
+        // Measured on the tail that is left once completed events have been
+        // taken out, because that tail is the only thing here that can grow
+        // without bound. Measuring the incoming chunk instead would fail a
+        // read that merely carried two valid events across one boundary, and
+        // whether that happens is decided by how the transport grouped its
+        // reads rather than by anything the stream did wrong.
+        if (buffer.length > MAX_BUFFER_SIZE) {
+          jsonSubject.error(
+            new Error(
+              `SSE buffer size exceeded maximum limit of ${MAX_BUFFER_SIZE / (1024 * 1024)} MB`,
+            ),
+          );
+          return;
         }
       }
     },
