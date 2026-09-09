@@ -21,7 +21,8 @@
         { "name": "AGUI.Formatting", "path": "sdks/dotnet/src/AGUI.Formatting", "ecosystem": "dotnet" },
         { "name": "AGUI.Protobuf", "path": "sdks/dotnet/src/AGUI.Protobuf", "ecosystem": "dotnet" },
         { "name": "AGUI.Client", "path": "sdks/dotnet/src/AGUI.Client", "ecosystem": "dotnet" },
-        { "name": "AGUI.Server", "path": "sdks/dotnet/src/AGUI.Server", "ecosystem": "dotnet" }
+        { "name": "AGUI.Server", "path": "sdks/dotnet/src/AGUI.Server", "ecosystem": "dotnet" },
+        { "name": "AGUI.A2UI", "path": "sdks/dotnet/src/AGUI.A2UI", "ecosystem": "dotnet" }
       ]
     },
     "create-ag-ui-app": {
@@ -29,6 +30,14 @@
       "sharedVersion": false,
       "packages": [
         { "name": "create-ag-ui-app", "path": "sdks/typescript/packages/cli", "ecosystem": "typescript" }
+      ]
+    },
+    "sdk-dotnet-a2ui-toolkit": {
+      "description": "A2UI Toolkit (standalone .NET SDK package, independently versioned)",
+      "sharedVersion": false,
+      "versionSource": "sdks/dotnet/src/AGUI.A2UI.Toolkit/Directory.Build.props",
+      "packages": [
+        { "name": "AGUI.A2UI.Toolkit", "path": "sdks/dotnet/src/AGUI.A2UI.Toolkit", "ecosystem": "dotnet" }
       ]
     },
     "sdk-ts-a2ui-toolkit": {

@@ -47,6 +47,7 @@ on:
           - sdk-py
           - sdk-py-a2ui-toolkit
           - sdk-dotnet
+          - sdk-dotnet-a2ui-toolkit
           - sdk-java
           - sdk-ts
           - sdk-ts-a2ui-toolkit

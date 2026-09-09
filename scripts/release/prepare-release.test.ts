@@ -91,7 +91,7 @@ test(
     assert.equal(result.status, 0, `stderr: ${result.stderr}`);
     const output = JSON.parse(result.stdout);
     assert.equal(output.scope, "sdk-dotnet");
-    assert.equal(output.packages.length, 5);
+    assert.equal(output.packages.length, 6);
     assert.deepEqual(
       output.packages.map((pkg: { name: string }) => pkg.name),
       [
@@ -100,6 +100,11 @@ test(
         "AGUI.Protobuf",
         "AGUI.Client",
         "AGUI.Server",
+        // AGUI.A2UI rides the shared train: its ProjectReferences to AGUI.Server and
+        // AGUI.Abstractions become NuGet dependencies at those projects' versions, so its
+        // version genuinely tracks the SDK. AGUI.A2UI.Toolkit does NOT appear here — it is
+        // sequenced separately under sdk-dotnet-a2ui-toolkit at the A2UI family version.
+        "AGUI.A2UI",
       ],
     );
     for (const pkg of output.packages) {

@@ -73,6 +73,7 @@ on:
       - "**/pyproject.toml"
       # Every Directory.Build.props that carries a released .NET VersionPrefix.
       - "sdks/dotnet/Directory.Build.props"
+      - "sdks/dotnet/src/AGUI.A2UI.Toolkit/Directory.Build.props"
       - "integrations/claude-managed-agents/dotnet/Directory.Build.props"
       # Every reactor pom.xml that carries a released Maven version. A module
       # pom only repeats its <parent><version>, so the reactor pom is the
@@ -127,6 +128,7 @@ on:
           - sdk-py
           - sdk-py-a2ui-toolkit
           - sdk-dotnet
+          - sdk-dotnet-a2ui-toolkit
           - sdk-java
           - sdk-ts
           - sdk-ts-a2ui-toolkit
@@ -2004,7 +2006,7 @@ jobs:
               # verify-release-scope-dropdowns.sh asserts this list maps every
               # config scope to the correct ecosystem, so it cannot drift.
               case "$SCOPE" in
-                integration-claude-managed-agents-dotnet|sdk-dotnet)
+                integration-claude-managed-agents-dotnet|sdk-dotnet|sdk-dotnet-a2ui-toolkit)
                   NUGET_INTENDED=true ;;
                 sdk-java)
                   MAVEN_INTENDED=true ;;
@@ -2081,7 +2083,7 @@ jobs:
                 # as "NuGet was never intended" and the failure page is swallowed.
                 # verify-release-scope-dropdowns.sh keeps it in step with
                 # release.config.json (and with the push trigger's paths).
-                DOTNET_VERSION_SOURCES="sdks/dotnet/Directory.Build.props integrations/claude-managed-agents/dotnet/Directory.Build.props"
+                DOTNET_VERSION_SOURCES="sdks/dotnet/Directory.Build.props integrations/claude-managed-agents/dotnet/Directory.Build.props sdks/dotnet/src/AGUI.A2UI.Toolkit/Directory.Build.props"
                 for props in $DOTNET_VERSION_SOURCES; do
                   if printf '%s\n' "$FILES" | grep -qxF "$props"; then
                     NUGET_INTENDED=true

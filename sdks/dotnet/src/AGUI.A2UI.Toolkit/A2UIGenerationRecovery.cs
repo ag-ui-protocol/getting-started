@@ -101,19 +101,30 @@ public static class A2UIGenerationRecovery
         return new A2UIRecoveryResult(WrapRecoveryExhaustedEnvelope(maxAttempts, attempts), attempts, Ok: false);
     }
 
-    // Resolves the attempt cap, falling back to A2UIConstants.MaxA2UIAttempts
-    // when the configured value is unset or non-positive. A zero/negative cap would skip
-    // the loop entirely and emit a confusing "0 attempt(s)" envelope, so it is treated as
-    // unset rather than honored. Shared by both generation paths.
-    internal static int ResolveMaxAttempts(A2UIRecoveryConfig? config)
+    /// <summary>
+    /// Resolves the attempt cap, falling back to <see cref="A2UIConstants.MaxA2UIAttempts"/>
+    /// when the configured value is unset or non-positive. A zero/negative cap would skip the
+    /// loop entirely and emit a confusing "0 attempt(s)" envelope, so it is treated as unset
+    /// rather than honored. Shared by both generation paths.
+    /// </summary>
+    /// <remarks>
+    /// Public so a hand-rolled integration can build its own generation loop from the same
+    /// primitives <see cref="RunAsync"/> uses — notably a STREAMING loop, which
+    /// <see cref="RunAsync"/> does not cover. See also
+    /// <see cref="AugmentPromptWithValidationErrors"/>, <see cref="ValidateAttempt"/> and
+    /// <see cref="WrapRecoveryExhaustedEnvelope"/>.
+    /// </remarks>
+    public static int ResolveMaxAttempts(A2UIRecoveryConfig? config)
         => config?.MaxAttempts is int max && max > 0 ? max : A2UIConstants.MaxA2UIAttempts;
 
-    // Validates one attempt's structured render_a2ui arguments, narrowing the
-    // untrusted model output to the expected component/data shapes. A null
-    // args (the subagent did not call the tool) is a failed, retryable
-    // attempt. Shared by the non-streaming loop and the streaming twin in A2UIChatClient
-    // so the two cannot drift on attempt semantics.
-    internal static A2UIAttemptRecord ValidateAttempt(int attempt, JsonObject? args, A2UIValidationCatalog? catalog)
+    /// <summary>
+    /// Validates one attempt's structured <c>render_a2ui</c> arguments, narrowing the untrusted
+    /// model output to the expected component/data shapes. A null <paramref name="args"/> (the
+    /// subagent did not call the tool) is a failed, retryable attempt. Shared by the
+    /// non-streaming loop and the streaming twin in <c>A2UIChatClient</c> so the two cannot
+    /// drift on attempt semantics.
+    /// </summary>
+    public static A2UIAttemptRecord ValidateAttempt(int attempt, JsonObject? args, A2UIValidationCatalog? catalog)
     {
         if (args is null)
         {
@@ -126,7 +137,12 @@ public static class A2UIGenerationRecovery
         return new A2UIAttemptRecord(attempt, result.Valid, result.Errors);
     }
 
-    internal static string WrapRecoveryExhaustedEnvelope(int maxAttempts, IReadOnlyList<A2UIAttemptRecord> attempts)
+    /// <summary>
+    /// Builds the structured <c>a2ui_recovery_exhausted</c> envelope returned when every attempt
+    /// failed validation, so an invalid surface never paints and the failure is renderable
+    /// rather than thrown.
+    /// </summary>
+    public static string WrapRecoveryExhaustedEnvelope(int maxAttempts, IReadOnlyList<A2UIAttemptRecord> attempts)
     {
         var attemptsArray = new JsonArray();
         foreach (A2UIAttemptRecord attempt in attempts)

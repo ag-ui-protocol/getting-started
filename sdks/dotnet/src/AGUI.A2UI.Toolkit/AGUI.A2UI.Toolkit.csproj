@@ -9,9 +9,14 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(SignAssembly)' != 'true'">
-    <!-- AGUI.A2UI (the adapter) calls the internal recovery helpers; the unit tests
-         exercise both the public surface and those internals directly. -->
-    <InternalsVisibleTo Include="AGUI.A2UI" />
+    <!-- Tests only. This grant is guarded on SignAssembly because a strong-named assembly must
+         name the friend's full public key in InternalsVisibleTo; CI builds test projects with
+         -p:SignAssembly=false, so the unguarded form works there.
+         There is deliberately NO grant to AGUI.A2UI: the adapter builds a streaming twin of the
+         recovery loop from ResolveMaxAttempts / AugmentPromptWithValidationErrors /
+         ValidateAttempt / WrapRecoveryExhaustedEnvelope, and those are public API precisely so a
+         hand-rolled integration can do the same. A cross-library internals grant would not have
+         survived signing, which this package requires. -->
     <InternalsVisibleTo Include="AGUI.A2UI.UnitTests" />
   </ItemGroup>
 

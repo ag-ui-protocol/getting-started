@@ -67,7 +67,6 @@ AGUI.A2UI.A2UIResolvedToolParams.Recovery.get -> AGUI.A2UI.A2UIRecoveryConfig?
 AGUI.A2UI.A2UIResolvedToolParams.ToolDescription.get -> string!
 AGUI.A2UI.A2UIResolvedToolParams.ToolName.get -> string!
 AGUI.A2UI.A2UIToolDefinitions
-AGUI.A2UI.A2UIToolkit
 AGUI.A2UI.A2UIToolParams
 AGUI.A2UI.A2UIToolParams.A2UIToolParams() -> void
 AGUI.A2UI.A2UIToolParams.Catalog.get -> AGUI.A2UI.A2UIValidationCatalog?
@@ -86,6 +85,7 @@ AGUI.A2UI.A2UIToolParams.ToolDescription.get -> string?
 AGUI.A2UI.A2UIToolParams.ToolDescription.init -> void
 AGUI.A2UI.A2UIToolParams.ToolName.get -> string?
 AGUI.A2UI.A2UIToolParams.ToolName.init -> void
+AGUI.A2UI.A2UIToolkit
 AGUI.A2UI.A2UIValidationCatalog
 AGUI.A2UI.A2UIValidationCatalog.A2UIValidationCatalog(System.Text.Json.Nodes.JsonObject! components) -> void
 AGUI.A2UI.A2UIValidationCatalog.Components.get -> System.Text.Json.Nodes.JsonObject!
@@ -125,7 +125,10 @@ const AGUI.A2UI.A2UIValidationErrorCodes.UnresolvedChild = "unresolved_child" ->
 static AGUI.A2UI.A2UIComponentValidator.Validate(System.Text.Json.Nodes.JsonArray? components, System.Text.Json.Nodes.JsonObject? data = null, AGUI.A2UI.A2UIValidationCatalog? catalog = null, bool validateBindings = true) -> AGUI.A2UI.A2UIValidationResult!
 static AGUI.A2UI.A2UIGenerationRecovery.AugmentPromptWithValidationErrors(string! prompt, System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIValidationError!>! errors) -> string!
 static AGUI.A2UI.A2UIGenerationRecovery.FormatValidationErrors(System.Collections.Generic.IEnumerable<AGUI.A2UI.A2UIValidationError!>! errors) -> string!
+static AGUI.A2UI.A2UIGenerationRecovery.ResolveMaxAttempts(AGUI.A2UI.A2UIRecoveryConfig? config) -> int
 static AGUI.A2UI.A2UIGenerationRecovery.RunAsync(string! basePrompt, System.Func<string!, int, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.Text.Json.Nodes.JsonObject?>>! invokeSubagentAsync, System.Func<System.Text.Json.Nodes.JsonObject!, string!>! buildEnvelope, AGUI.A2UI.A2UIValidationCatalog? catalog = null, AGUI.A2UI.A2UIRecoveryConfig? config = null, System.Action<AGUI.A2UI.A2UIAttemptRecord!>? onAttempt = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<AGUI.A2UI.A2UIRecoveryResult!>!
+static AGUI.A2UI.A2UIGenerationRecovery.ValidateAttempt(int attempt, System.Text.Json.Nodes.JsonObject? args, AGUI.A2UI.A2UIValidationCatalog? catalog) -> AGUI.A2UI.A2UIAttemptRecord!
+static AGUI.A2UI.A2UIGenerationRecovery.WrapRecoveryExhaustedEnvelope(int maxAttempts, System.Collections.Generic.IReadOnlyList<AGUI.A2UI.A2UIAttemptRecord!>! attempts) -> string!
 static AGUI.A2UI.A2UIOperationBuilder.CreateSurface(string! surfaceId, string! catalogId) -> System.Text.Json.Nodes.JsonObject!
 static AGUI.A2UI.A2UIOperationBuilder.UpdateComponents(string! surfaceId, System.Collections.Generic.IEnumerable<System.Text.Json.Nodes.JsonNode?>! components) -> System.Text.Json.Nodes.JsonObject!
 static AGUI.A2UI.A2UIOperationBuilder.UpdateDataModel(string! surfaceId, System.Text.Json.Nodes.JsonNode? value, string! path = "/") -> System.Text.Json.Nodes.JsonObject!
