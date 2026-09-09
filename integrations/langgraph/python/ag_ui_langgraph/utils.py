@@ -1737,10 +1737,37 @@ def agui_messages_to_langchain(messages: List[AGUIMessage]) -> List[BaseMessage]
             tool_calls = []
             if hasattr(message, "tool_calls") and message.tool_calls:
                 for tc in message.tool_calls:
+                    args = {}
+                    if hasattr(tc, "function") and tc.function.arguments:
+                        try:
+                            args = json.loads(tc.function.arguments)
+                        except (json.JSONDecodeError, TypeError):
+                            # `arguments` is the CLIENT's own locally-accumulated
+                            # string, built up from streamed TOOL_CALL_ARGS
+                            # deltas it received over a prior run — it can
+                            # arrive corrupted here for reasons outside this
+                            # function's control (e.g. a parallel-tool-call
+                            # stream whose deltas got merged under the wrong
+                            # tool_call_id, or a run stopped mid-stream leaving
+                            # a truncated JSON string). Since `messages` is the
+                            # client's full history replayed on every future
+                            # run, raising here used to crash not just the run
+                            # that produced the bad arguments but EVERY
+                            # subsequent run in the same conversation — the
+                            # thread became permanently unusable. Falling back
+                            # to `{}` matches how this same branch already
+                            # treats an empty `arguments` string (see the `and
+                            # tc.function.arguments` guard above); this just
+                            # extends that existing fallback to a
+                            # non-empty-but-invalid one too.
+                            logger.warning(
+                                "Dropping unparseable tool_call arguments for %s (id=%s)",
+                                tc.function.name, tc.id,
+                            )
                     tool_calls.append({
                         "id": tc.id,
                         "name": tc.function.name,
-                        "args": json.loads(tc.function.arguments) if hasattr(tc, "function") and tc.function.arguments else {},
+                        "args": args,
                         "type": "tool_call",
                     })
             # Fold any buffered reasoning blocks onto this assistant message.

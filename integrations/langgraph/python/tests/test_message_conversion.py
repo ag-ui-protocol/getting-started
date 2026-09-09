@@ -68,6 +68,40 @@ class TestAguiMessagesToLangchain(unittest.TestCase):
         assert ai.tool_calls[0]["name"] == "search"
         assert ai.tool_calls[0]["args"] == {"query": "weather"}
 
+    def test_assistant_message_with_corrupted_tool_call_arguments(self):
+        """A tool call's `arguments` string is the client's own locally-
+        accumulated buffer of streamed TOOL_CALL_ARGS deltas from a prior
+        run — it can arrive here corrupted for reasons outside this
+        function's control (e.g. a parallel-tool-call stream whose deltas
+        got merged under the wrong tool_call_id, or a run stopped mid-
+        stream leaving a truncated JSON string). Since `messages` is the
+        client's full history replayed on every future run, this must not
+        raise: raising here crashes not just the run that produced the bad
+        arguments but every subsequent run in the same conversation."""
+        msg = AGUIAssistantMessage(
+            id="a3",
+            role="assistant",
+            content="",
+            tool_calls=[
+                AGUIToolCall(
+                    id="tc2",
+                    type="function",
+                    function=AGUIFunctionCall(
+                        name="write_file",
+                        arguments='{"path": "a.txt" "content": "x"}',
+                    ),
+                )
+            ],
+        )
+        result = agui_messages_to_langchain([msg])
+        assert len(result) == 1
+        ai = result[0]
+        assert isinstance(ai, AIMessage)
+        assert len(ai.tool_calls) == 1
+        assert ai.tool_calls[0]["id"] == "tc2"
+        assert ai.tool_calls[0]["name"] == "write_file"
+        assert ai.tool_calls[0]["args"] == {}
+
     def test_system_message(self):
         msg = AGUISystemMessage(id="s1", role="system", content="You are helpful")
         result = agui_messages_to_langchain([msg])
