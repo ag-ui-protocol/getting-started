@@ -43,7 +43,7 @@ class TestConstants(unittest.TestCase):
     def test_basic_catalog_id(self):
         self.assertEqual(
             BASIC_CATALOG_ID,
-            "https://a2ui.org/specification/v0_9/basic_catalog.json",
+            "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json",
         )
 
 

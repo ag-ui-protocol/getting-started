@@ -31,7 +31,7 @@ describe("constants", () => {
   });
 
   it("BASIC_CATALOG_ID points at the v0.9 basic catalog", () => {
-    expect(BASIC_CATALOG_ID).toBe("https://a2ui.org/specification/v0_9/basic_catalog.json");
+    expect(BASIC_CATALOG_ID).toBe("https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json");
   });
 });
 

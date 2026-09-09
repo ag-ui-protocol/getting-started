@@ -76,7 +76,8 @@ from .recovery import (  # noqa: E402
 A2UI_OPERATIONS_KEY = "a2ui_operations"
 """Container key the A2UI middleware looks for in tool results."""
 
-BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/basic_catalog.json"
+# Canonical $id declared by the A2UI v0.9 basic catalog specification.
+BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
 """Default catalog id used when the subagent does not specify one."""
 
 A2UI_SCHEMA_CONTEXT_DESCRIPTION = (
