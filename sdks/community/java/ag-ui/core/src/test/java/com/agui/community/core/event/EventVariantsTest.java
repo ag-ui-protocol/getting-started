@@ -138,6 +138,15 @@ class EventVariantsTest {
     }
 
     @Test
+    void reasoningMessageStartRetainsThreeArgConstructor() {
+        ReasoningMessageStartEvent event = new ReasoningMessageStartEvent("r1", 123L, "original-event");
+        assertEquals("r1", event.messageId());
+        assertEquals(Role.REASONING, event.role());
+        assertEquals(123L, event.timestamp());
+        assertSame("original-event", event.rawEvent());
+    }
+
+    @Test
     void reasoningMessageChunkAllowsNullDelta() {
         ReasoningMessageChunkEvent event = new ReasoningMessageChunkEvent("m", null);
         assertNull(event.delta());

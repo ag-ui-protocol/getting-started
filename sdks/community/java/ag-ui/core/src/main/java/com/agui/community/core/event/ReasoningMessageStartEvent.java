@@ -36,6 +36,21 @@ public record ReasoningMessageStartEvent(String messageId, Role role, Long times
         this(messageId, Role.REASONING, null, null);
     }
 
+    /**
+     * Creates a reasoning-message-start event without an explicit role,
+     * defaulting it to {@link Role#REASONING}. Preserves backward compatibility
+     * with callers written against the original three-argument record.
+     *
+     * @param messageId the unique message identifier
+     * @param timestamp the event creation time in epoch milliseconds, or
+     *                  {@code null}
+     * @param rawEvent  the original event this was transformed from, or
+     *                  {@code null}
+     */
+    public ReasoningMessageStartEvent(String messageId, Long timestamp, Object rawEvent) {
+        this(messageId, Role.REASONING, timestamp, rawEvent);
+    }
+
     @Override
     public EventType type() {
         return EventType.REASONING_MESSAGE_START;
