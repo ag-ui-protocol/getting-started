@@ -1747,8 +1747,16 @@ export class LangGraphAgent extends AbstractAgent {
   private handleMessagesTupleEvent(data: any[]) {
     const chunk = data[0];
 
-    // Skip non-AI chunks (e.g., tool result messages, human messages)
-    if (chunk.type && chunk.type !== "AIMessageChunk") return;
+    // Skip non-AI chunks (e.g., tool result messages, human messages).
+    //
+    // The value carried here is LangChain's MessageType — "ai", "human",
+    // "tool", "system" — and not a class name. A real AIMessageChunk reports
+    // "ai" on the wire and in process alike, so comparing against the class
+    // name matched nothing and discarded every tuple this handler was given.
+    // "generic" is accepted next to "ai" for the same reason
+    // langchainMessagesToAgui folds it into the assistant branch: LangGraph
+    // emits it for non-chat models that set no more specific type.
+    if (chunk.type && chunk.type !== "ai" && chunk.type !== "generic") return;
 
     const content =
       typeof chunk.content === "string"
@@ -1757,7 +1765,13 @@ export class LangGraphAgent extends AbstractAgent {
           ? chunk.content.find((c: any) => c.type === "text")?.text
           : null;
     const toolCallChunks = chunk.tool_call_chunks;
-    const isFinished = chunk.response_metadata?.finish_reason === "stop";
+    // Any finish reason ends the turn, not "stop" alone: a turn that ends in a
+    // tool call reports "tool_calls" or "tool_use" depending on the provider.
+    // Matching only "stop" left that turn's entry in messagesInProcess, so its
+    // TOOL_CALL_END was never emitted and the text of the following turn was
+    // streamed against a message that had never been started. The events-mode
+    // path reads the same field the same way, returning on any finish reason.
+    const isFinished = Boolean(chunk.response_metadata?.finish_reason);
     const currentStream = this.getMessageInProgress(this.activeRun!.id);
 
     // Handle tool call chunks
