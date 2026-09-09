@@ -84,6 +84,10 @@ class CopilotKitState(FlowState):
     """CopilotKit state"""
     messages: List[Any] = Field(default_factory=list)
     copilotkit: CopilotKitProperties = Field(default_factory=CopilotKitProperties)
+    # ``crewai_prepare_inputs`` writes ``RunAgentInput.context`` onto the
+    # kickoff payload. Declare it so Pydantic keeps the entries instead of
+    # silently dropping them before ``@start`` runs.
+    context: List[Any] = Field(default_factory=list)
     # CrewAI's experimental conversational runtime writes these fields while a
     # turn is being routed. Exclude them from AG-UI state snapshots so enabling
     # the runtime contract does not change regular Flow wire state.
