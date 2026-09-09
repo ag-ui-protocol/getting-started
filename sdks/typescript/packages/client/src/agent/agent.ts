@@ -489,8 +489,7 @@ export abstract class AbstractAgent {
           subscriber.onRunFailed?.({ error, messages, state, agent: this, input }),
       ),
     ).pipe(
-      map((onRunFailedMutation) => {
-        const mutation = onRunFailedMutation as AgentStateMutation;
+      map((mutation) => {
         if (mutation.messages !== undefined || mutation.state !== undefined) {
           if (mutation.messages !== undefined) {
             this.messages = mutation.messages;

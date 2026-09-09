@@ -465,6 +465,46 @@ describe("AgentSubscriber", () => {
       consoleErrorSpy.mockRestore();
     });
 
+    it("should type-check an onRunFailed implementation that returns stopPropagation", async () => {
+      // Regression test for the `onRunFailed` type signature: it must accept the
+      // full `AgentStateMutation` (including `stopPropagation`), not
+      // `Omit<AgentStateMutation, "stopPropagation">`. Unlike `vi.fn().mockReturnValue(...)`
+      // (which erases the return type), this directly-typed implementation only
+      // compiles if `onRunFailed` is allowed to return `stopPropagation`.
+      // No explicit return-type annotation: the object literal below is checked
+      // against `AgentSubscriber["onRunFailed"]`'s contextual return type via
+      // TS excess-property checking, which is exactly what caught the bug.
+      const onRunFailed: AgentSubscriber["onRunFailed"] = () => ({
+        stopPropagation: true,
+      });
+
+      const errorHandlingSubscriber: AgentSubscriber = { onRunFailed };
+
+      class ErrorAgent extends AbstractAgent {
+        run(input: RunAgentInput): Observable<BaseEvent> {
+          return from([
+            {
+              type: EventType.RUN_STARTED,
+              threadId: input.threadId,
+              runId: input.runId,
+            } as RunStartedEvent,
+          ]).pipe(mergeMap(() => throwError(() => new Error("Test error"))));
+        }
+      }
+
+      const errorAgent = new ErrorAgent();
+      errorAgent.subscribe(errorHandlingSubscriber);
+
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation();
+
+      // Runtime already honored stopPropagation from onRunFailed before this fix;
+      // this test's value is that it fails to compile without the type fix.
+      await expect(errorAgent.runAgent({})).resolves.toBeDefined();
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+      consoleErrorSpy.mockRestore();
+    });
+
     it("should allow default error behavior when stopPropagation is false", async () => {
       const errorHandlingSubscriber: AgentSubscriber = {
         onRunFailed: vi.fn().mockReturnValue({
