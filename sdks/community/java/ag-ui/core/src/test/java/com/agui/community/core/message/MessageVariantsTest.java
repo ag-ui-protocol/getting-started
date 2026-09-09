@@ -128,7 +128,20 @@ class MessageVariantsTest {
         assertEquals("thinking", withName.content());
         assertEquals(Role.REASONING, withName.role());
 
-        assertNull(new ReasoningMessage("m", "thinking").name());
+        ReasoningMessage plain = new ReasoningMessage("m", "thinking");
+        assertNull(plain.name());
+        assertNull(plain.encryptedValue());
+    }
+
+    @Test
+    void reasoningMessagePreservesEncryptedValue() {
+        ReasoningMessage message = new ReasoningMessage("m", "thinking", "brain", "cipher");
+        assertEquals("cipher", message.encryptedValue());
+        assertEquals("brain", message.name());
+        assertEquals("thinking", message.content());
+        assertEquals(Role.REASONING, message.role());
+
+        assertNull(new ReasoningMessage("m", "thinking", "brain").encryptedValue());
     }
 
     @Test

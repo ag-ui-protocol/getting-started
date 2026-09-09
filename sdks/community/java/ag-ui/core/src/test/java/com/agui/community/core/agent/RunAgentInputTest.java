@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.agui.community.core.interrupt.Resume;
 import com.agui.community.core.interrupt.ResumeStatus;
 import com.agui.community.core.message.Message;
+import com.agui.community.core.message.ReasoningMessage;
 import com.agui.community.core.message.UserMessage;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,18 @@ class RunAgentInputTest {
         assertEquals(1, input.messages().size());
         assertThrows(UnsupportedOperationException.class,
                 () -> input.messages().add(new UserMessage("m2", "yo")));
+    }
+
+    @Test
+    void reasoningMessageEncryptedValueSurvivesRoundTrip() {
+        ReasoningMessage reasoning = new ReasoningMessage("m1", "thinking", null, "cipher");
+
+        RunAgentInput input = new RunAgentInput("t1", "r1", List.of(reasoning), List.of());
+
+        assertEquals(1, input.messages().size());
+        Message stored = input.messages().get(0);
+        assertEquals(reasoning, stored);
+        assertEquals("cipher", ((ReasoningMessage) stored).encryptedValue());
     }
 
     @Test
